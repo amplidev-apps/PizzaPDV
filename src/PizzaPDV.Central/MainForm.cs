@@ -320,15 +320,18 @@ public class MainForm : Form
         pnlMain.Controls.Clear();
         pnlMain.Controls.Add(TitleBar("Balcão", "F2 • Venda rápida sem mesa • Adicione itens, escolha borda, finalize e imprime"));
 
-        var split = new SplitContainer { Dock = DockStyle.Fill, SplitterDistance = 560, Panel1MinSize = 400, Panel2MinSize = 320, BackColor = C_Bg };
-        pnlMain.Controls.Add(split);
+        var table = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, BackColor = C_Bg, Padding = new Padding(0, 8, 0, 0) };
+        table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 58));
+        table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 42));
+        table.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        pnlMain.Controls.Add(table);
 
         // Esquerda: produtos + borda + obs
         var leftCard = Card(new Panel(), 12);
         var left = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent };
         leftCard.Controls.Clear(); leftCard.Controls.Add(left);
         leftCard.Padding = new Padding(12);
-        split.Panel1.Controls.Add(leftCard);
+        table.Controls.Add(leftCard, 0, 0);
 
         var lblProd = new Label { Text = "Produto", Font = new Font("Segoe UI", 8f, FontStyle.Bold), ForeColor = C_Muted, Height = 18, Dock = DockStyle.Top };
         var cbProd = new ComboBox { Dock = DockStyle.Top, Height = 30, DropDownStyle = ComboBoxStyle.DropDownList, Font = new Font("Segoe UI", 9f) };
@@ -372,7 +375,7 @@ public class MainForm : Form
         var rightCard = Card(new Panel(), 12);
         var right = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent };
         rightCard.Controls.Clear(); rightCard.Controls.Add(right);
-        split.Panel2.Controls.Add(rightCard);
+        table.Controls.Add(rightCard, 1, 0);
 
         var lblCliente = new Label { Text = "Cliente (opcional)", Font = new Font("Segoe UI", 8f, FontStyle.Bold), ForeColor = C_Muted, Height = 18, Dock = DockStyle.Top };
         var txtCliente = new TextBox { Dock = DockStyle.Top, Height = 30, PlaceholderText = "Nome", Font = new Font("Segoe UI", 9f) };
