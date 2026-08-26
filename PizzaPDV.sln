@@ -1,0 +1,55 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{044D4C58-ABF6-4BEA-B424-C0CB46D05FD7}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PizzaPDV.Core", "src\PizzaPDV.Core\PizzaPDV.Core.csproj", "{6AF8A95E-E6AB-48F9-BD6F-B917E975EE5B}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PizzaPDV.Data", "src\PizzaPDV.Data\PizzaPDV.Data.csproj", "{993D69CF-987B-4554-BEC4-35AE387C5F51}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PizzaPDV.Printer", "src\PizzaPDV.Printer\PizzaPDV.Printer.csproj", "{6105EF77-5448-42CC-B8BE-003C93E343DD}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PizzaPDV.Sync", "src\PizzaPDV.Sync\PizzaPDV.Sync.csproj", "{98E1DE36-BA4C-4FFA-BA3C-085C73BFAD3D}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PizzaPDV.Central", "src\PizzaPDV.Central\PizzaPDV.Central.csproj", "{EF8A4F6F-E915-4B4C-8C00-DFA6EC7F8C18}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{6AF8A95E-E6AB-48F9-BD6F-B917E975EE5B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6AF8A95E-E6AB-48F9-BD6F-B917E975EE5B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6AF8A95E-E6AB-48F9-BD6F-B917E975EE5B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6AF8A95E-E6AB-48F9-BD6F-B917E975EE5B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{993D69CF-987B-4554-BEC4-35AE387C5F51}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{993D69CF-987B-4554-BEC4-35AE387C5F51}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{993D69CF-987B-4554-BEC4-35AE387C5F51}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{993D69CF-987B-4554-BEC4-35AE387C5F51}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6105EF77-5448-42CC-B8BE-003C93E343DD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6105EF77-5448-42CC-B8BE-003C93E343DD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6105EF77-5448-42CC-B8BE-003C93E343DD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6105EF77-5448-42CC-B8BE-003C93E343DD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{98E1DE36-BA4C-4FFA-BA3C-085C73BFAD3D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{98E1DE36-BA4C-4FFA-BA3C-085C73BFAD3D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{98E1DE36-BA4C-4FFA-BA3C-085C73BFAD3D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{98E1DE36-BA4C-4FFA-BA3C-085C73BFAD3D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{EF8A4F6F-E915-4B4C-8C00-DFA6EC7F8C18}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{EF8A4F6F-E915-4B4C-8C00-DFA6EC7F8C18}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{EF8A4F6F-E915-4B4C-8C00-DFA6EC7F8C18}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{EF8A4F6F-E915-4B4C-8C00-DFA6EC7F8C18}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{6AF8A95E-E6AB-48F9-BD6F-B917E975EE5B} = {044D4C58-ABF6-4BEA-B424-C0CB46D05FD7}
+		{993D69CF-987B-4554-BEC4-35AE387C5F51} = {044D4C58-ABF6-4BEA-B424-C0CB46D05FD7}
+		{6105EF77-5448-42CC-B8BE-003C93E343DD} = {044D4C58-ABF6-4BEA-B424-C0CB46D05FD7}
+		{98E1DE36-BA4C-4FFA-BA3C-085C73BFAD3D} = {044D4C58-ABF6-4BEA-B424-C0CB46D05FD7}
+		{EF8A4F6F-E915-4B4C-8C00-DFA6EC7F8C18} = {044D4C58-ABF6-4BEA-B424-C0CB46D05FD7}
+	EndGlobalSection
+EndGlobal

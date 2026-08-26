@@ -15,3 +15,11 @@ build
 Thumbs.db
 coverage
 .vercel
+# dotnet batata
+bin/
+obj/
+publish/
+release-batata/
+publish-batata-framework/
+*.user
+*.suo

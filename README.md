@@ -1,62 +1,65 @@
-# PizzaPDV — Caixa & Atendimento
+# PizzaPDV — Caixa & Atendimento (Batata Classic)
 
-Sistema profissional para pizzaria local (1 unidade) — 2 núcleos:
-- **Site** (`apps/site`): Next.js cardápio com meia-a-meia, bordas cobradas, taxa fixa por bairro, Pix PushinPay
-- **Central** (`apps/central`): Electron Windows offline-first, SQLite + outbox sync, impressão JP-58H 58mm, mesas 1-20, caixa, fidelidade 10G→1P
+Sistema profissional para pizzaria local (1 unidade, sítio CE) — 2 núcleos:
+- **Site** (`apps/site`): Next.js cardápio com meia-a-meia, bordas cobradas (catupiry/vulcão...), taxa fixa por bairro, Pix PushinPay
+- **Central BATATA** (`src/PizzaPDV.Central`): **C# WinForms .NET 8** — 2.5MB, 15MB RAM, roda em Core Duo DDR2 4GB SynX 10, SQLite WAL offline-first + outbox → Supabase → Site, JP-58H 58mm ESC/POS, mesas 1-20, caixa, fidelidade 10G→1P
+
+> PDV clássico: F1 Pedidos | F2 Mesas | F3 Cardápio | F4 Caixa | F5 Clientes | F12 Imprimir — sem animações, sem Chrome, abre <1s na batata.
 
 ## Stack
-- Monorepo pnpm + TypeScript
-- Supabase (Postgres + Realtime) — ver `apps/api/supabase/schema.sql` e `seed.sql`
-- Shared: `packages/shared` (Zod schemas, pricing, fidelidade)
-- Site: Next.js 15 + Tailwind
-- Central: Electron + Vite + better-sqlite3 + node-thermal-printer (JP-58H)
+- Monorepo pnpm (Site) + dotnet sln (Central)
+- Supabase (Postgres + Realtime) — `apps/api/supabase/schema.sql:1` + `seed.sql:1` + `schema_patch_catalog.sql:1` (Central dona do cardápio)
+- Shared: `packages/shared` (Zod) + `src/PizzaPDV.Core` (C# port Pricing/Fidelidade)
+- Site: Next.js 15 + Tailwind — consome catálogo via `apps/site/src/lib/catalog.ts:1` Realtime
+- Central: C# WinForms .NET 8 + Microsoft.Data.Sqlite + Dapper + RawPrinter WinSpool (`src/PizzaPDV.Printer/RawPrinter.cs:1`, `Templates.cs:1`) + SyncService (`src/PizzaPDV.Sync/SyncService.cs:1`)
 
-## Começar (Fase 0)
-
+## Começar — Site
 ```bash
-# 1. Instalar
 pnpm install
-
-# 2. Supabase: crie projeto, rode schema.sql + seed.sql no SQL Editor, ative Realtime em pedidos/mesas/comandas
-# 3. Configure envs
+# Supabase: crie projeto → SQL Editor → rode schema.sql + seed.sql + schema_patch_catalog.sql → habilite Realtime em produtos/variacoes/bordas/bairros/sabores/pedidos
 cp apps/site/.env.example apps/site/.env.local
-cp apps/api/.env.example apps/api/.env
-cp apps/central/.env.example apps/central/.env  # crie se precisar
-
-# .env.local site
-NEXT_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
-
-# .env api/central
-SUPABASE_URL=...
-SUPABASE_SERVICE_ROLE_KEY=...
-PUSHINPAY_API_KEY=...           # opcional p/ Pix QR
-PUSHINPAY_WEBHOOK_URL=https://xxx.supabase.co/functions/v1/pushinpay-webhook
-
-# 4. Rodar
-pnpm --filter @pizzapdv/site dev      # http://localhost:3000
-pnpm --filter @pizzapdv/central dev   # http://localhost:5173 (Vite) + Electron
+# NEXT_PUBLIC_SUPABASE_URL / ANON
+pnpm --filter @pizzapdv/site dev # http://localhost:3000
 ```
 
+## Começar — Central Batata (Windows 10 SynX)
+```bash
+# Pré-requisito: .NET 8 SDK (https://dotnet.microsoft.com/download)
+dotnet build PizzaPDV.sln -c Release
+dotnet run --project src/PizzaPDV.Central -c Release
+# ou publique:
+dotnet publish src/PizzaPDV.Central -c Release -r win-x64 --self-contained false # framework-dependent -> release-batata/framework (2.5MB)
+dotnet publish src/PizzaPDV.Central -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true # portable single 156MB -> release-batata/portable
+```
+
+**Executáveis gerados:**
+- `release-batata/framework/PizzaPDV.Central.exe` (151KB + DLLs = 2.5MB) — precisa .NET 8 Runtime no PC (recomendado batata com runtime instalado)
+- `release-batata/portable/PizzaPDV-Portable.exe` (156MB) — roda sem instalar nada, copie para a batata e execute
+
+DB local: `pizzapdv.db` ao lado do .exe (WAL). Seed inicial: 4 produtos, 6 bordas, 5 bairros, 20 mesas.
+
+## Fluxo Cardápio (Central → Site)
+1. Central F3 Cardápio: CRUD produtos/P/G/unico, sabores, bordas (8-18), bairros/taxa. Salva local + `outbox`.
+2. SyncService envia a cada 10s se online (ou ao clicar Sincronizar). Supabase `upsert` com `Prefer: resolution=merge-duplicates`.
+3. Site `catalog.ts:1` faz `fetchCatalog()` + `subscribeCatalog()` — atualiza sem reload.
+
 ## Impressora JP-58H 58mm
-- Instale driver Windows, compartilhe como `JP-58H`
-- Teste: Central → Pedidos → botão Cozinha/Cliente. Sem impressora, cai em mock e loga no console + salva raw.
-- Templates: `apps/central/src/printer/templates.ts:1` (cozinha com MESA, cliente, delivery)
+- Instale driver, compartilhe como `JP-58H` (ou `POS-58`). Central tenta `JP-58H` → `POS-58` → mock em `%TEMP%\pizzapdv_mock_*.txt`.
+- Teste: F12 ou Pedidos → Cozinha/Cliente. Templates 32cols em `PizzaPDV.Printer/Templates.cs:1` (cozinha com MESA 07 em destaque).
 
 ## Offline-first
-- Central grava em `pizzapdv.db` (SQLite WAL) + tabela `outbox`
-- `apps/central/src/sync/outbox.ts:1` → `startSyncLoop()` sincroniza quando `navigator.onLine`
-- IDs temporários `tmp_*` viram UUID real no Supabase
+- Sem rede: Central grava `pedidos_local` + `outbox` (`tmp_xxx`). Mesas/balcão funcionam normal.
+- Voltou rede: `SyncService.SyncOutboxAsync()` envia fila; `PullCatalogAsync()` puxa cardápio do cloud se necessário.
 
-## Fidelidade & Precificação
-- `packages/shared/src/fidelidade.ts:1` — 10G → 1P
-- `packages/shared/src/pricing.ts:1` — custo ficha técnica + margem
+## Verificação batata
+```bash
+#pricing + fidelidade + seed + templates
+dotnet run --project TestBatata # (exemplo temporário, removido)
+# esperado: Pricing 45.00, fidelidade 0/10 1 cupom, 4 produtos/6 bordas/5 bairros/20 mesas
+```
 
-## Próximos passos Fase 1
-- [ ] Conectar Site ao Supabase (substituir mocks em `apps/site/src/app/page.tsx:1`)
-- [ ] Realtime Site→Central (Supabase channel pedidos)
-- [ ] Conectar Central sync real + teste offline (desligar wifi, lançar mesa, religar e ver sync)
-- [ ] PushinPay webhook Edge Function deploy
-- [ ] Teste de impressão real JP-58H
-
-Veja `PLANO.md` (se existir) para roadmap completo.
+## Próximos passos
+- [ ] Instalar na batata SynX 10 e testar JP-58H real
+- [ ] Configurar `SUPABASE_URL`/`SERVICE_ROLE_KEY` como variáveis de ambiente no PC (ou `appsettings.json`)
+- [ ] Deploy schema_patch_catalog.sql no Supabase produção
+- [ ] Teste offline: desligar wifi, lançar mesa, religar

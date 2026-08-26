@@ -1,0 +1,18 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\PizzaPDV.Core\PizzaPDV.Core.csproj" />
+    <ProjectReference Include="..\PizzaPDV.Data\PizzaPDV.Data.csproj" />
+    <ProjectReference Include="..\PizzaPDV.Printer\PizzaPDV.Printer.csproj" />
+    <ProjectReference Include="..\PizzaPDV.Sync\PizzaPDV.Sync.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+</Project>
