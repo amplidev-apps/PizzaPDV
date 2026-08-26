@@ -36,11 +36,21 @@ public static class RawPrinter
         [MarshalAs(UnmanagedType.LPStr)] public string pDataType = "RAW";
     }
 
+    static RawPrinter()
+    {
+        try { Encoding.RegisterProvider(CodePagesEncodingProvider.Instance); } catch { }
+    }
+
+    private static Encoding GetPrinterEncoding()
+    {
+        try { return Encoding.GetEncoding(850); } catch { return Encoding.UTF8; }
+    }
+
     public static bool Print(string printerName, string text, out string error)
     {
         error = "";
         // ESC/POS: texto puro já funciona na JP-58H; adiciona cut no final
-        var bytes = Encoding.GetEncoding(850).GetBytes(text + "\n\n\n\x1D\x56\x00");
+        var bytes = GetPrinterEncoding().GetBytes(text + "\n\n\n\x1D\x56\x00");
         IntPtr pBytes = Marshal.AllocCoTaskMem(bytes.Length);
         Marshal.Copy(bytes, 0, pBytes, bytes.Length);
         try
