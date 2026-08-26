@@ -1,0 +1,17 @@
+{
+  "name": "@pizzapdv/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "db:push": "node ./scripts/push.js",
+    "db:seed": "node ./scripts/seed.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}
