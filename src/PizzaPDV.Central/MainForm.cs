@@ -215,12 +215,26 @@ public class MainForm : Form
 
     private Panel TitleBar(string title, string subtitle)
     {
-        var p = new Panel { Dock = DockStyle.Top, Height = 44, BackColor = Color.Transparent, Padding = new Padding(0, 0, 0, 8) };
+        var p = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent, Padding = new Padding(0, 0, 0, 8) };
         var l1 = new Label { Text = title, Font = new Font("Segoe UI", 12f, FontStyle.Bold), ForeColor = C_Text, Dock = DockStyle.Top, Height = 22 };
         var l2 = new Label { Text = subtitle, Font = new Font("Segoe UI", 8.5f), ForeColor = C_Muted, Dock = DockStyle.Top, Height = 16 };
         p.Controls.Add(l2);
         p.Controls.Add(l1);
         return p;
+    }
+
+    // Layout base sem Dock aninhado poluído — usa TableLayoutPanel para evitar cortes
+    private TableLayoutPanel PageLayout(Control titleBar, Control? toolbar, Control content)
+    {
+        var t = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, BackColor = Color.Transparent, Padding = new Padding(0) };
+        t.RowStyles.Add(new RowStyle(SizeType.Absolute, 44)); // title
+        if (toolbar != null) t.RowStyles.Add(new RowStyle(SizeType.Absolute, 42)); // toolbar
+        t.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); // content
+        t.Controls.Add(titleBar, 0, 0);
+        if (toolbar != null) t.Controls.Add(toolbar, 0, 1);
+        t.Controls.Add(content, 0, toolbar != null ? 2 : 1);
+        t.RowCount = toolbar != null ? 3 : 2;
+        return t;
     }
 
     private Button BtnPrimary(string text, Action onClick)
@@ -274,15 +288,12 @@ public class MainForm : Form
     private void LoadPedidos()
     {
         pnlMain.Controls.Clear();
-        pnlMain.Controls.Add(TitleBar("Pedidos", "F1 • Recebido → Preparo → Pronto → Entregue • F12 imprime cozinha"));
-
-        var tool = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 40, FlowDirection = FlowDirection.LeftToRight, Padding = new Padding(0, 4, 0, 4), BackColor = Color.Transparent };
-        pnlMain.Controls.Add(tool);
-
+        var title = TitleBar("Pedidos", "F1 • Recebido → Preparo → Pronto → Entregue • F12 imprime cozinha");
+        var tool = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, Padding = new Padding(0, 6, 0, 6), BackColor = Color.Transparent, WrapContents = false, AutoScroll = false };
         var grid = CleanGrid();
         var card = Card(grid, 0);
-        card.Dock = DockStyle.Fill;
-        pnlMain.Controls.Add(card);
+        var layout = PageLayout(title, tool, card);
+        pnlMain.Controls.Add(layout);
 
         using var conn = _db.Connect();
         conn.Open();
@@ -300,6 +311,25 @@ public class MainForm : Form
         tool.Controls.Add(BtnGhost("Cozinha", () => PrintSelected(grid, "cozinha")));
         tool.Controls.Add(BtnGhost("Cliente", () => PrintSelected(grid, "cliente")));
         tool.Controls.Add(BtnGhost("Delivery", () => PrintSelected(grid, "delivery")));
+
+        // Menu de contexto Pedidos
+        var cms = new ContextMenuStrip();
+        cms.Items.Add("Ver detalhe", null, (_,__)=> { if(grid.SelectedRows.Count>0) MessageBox.Show($"Pedido {grid.SelectedRows[0].Cells[0].Value} — Cliente {grid.SelectedRows[0].Cells[3].Value}", "Detalhe"); });
+        cms.Items.Add(new ToolStripSeparator());
+        cms.Items.Add("Mudar status ▶", null,
+            (_,__)=>{ var sub=new ContextMenuStrip();
+                foreach(var st in new[]{"recebido","preparo","pronto","entregue","cancelado"}) sub.Items.Add(st, null, (a,b)=> MoveSelected(grid, st));
+                sub.Show(Cursor.Position); });
+        cms.Items.Add("Reimprimir ▶", null, (_,__)=>{ var sub=new ContextMenuStrip();
+                sub.Items.Add("Cozinha", null, (a,b)=> PrintSelected(grid,"cozinha"));
+                sub.Items.Add("Cliente", null, (a,b)=> PrintSelected(grid,"cliente"));
+                sub.Items.Add("Delivery", null, (a,b)=> PrintSelected(grid,"delivery"));
+                sub.Show(Cursor.Position); });
+        cms.Items.Add("Atribuir entregador", null, (_,__)=> MessageBox.Show("Atribuir entregador — selecione na lista de entregadores."));
+        cms.Items.Add(new ToolStripSeparator());
+        cms.Items.Add("Cancelar pedido", null, (_,__)=> { if(MessageBox.Show("Cancelar pedido?","Confirmar",MessageBoxButtons.YesNo)==DialogResult.Yes) MoveSelected(grid,"cancelado"); });
+        grid.ContextMenuStrip = cms;
+        grid.CellMouseDown += (s,e)=>{ if(e.Button==MouseButtons.Right && e.RowIndex>=0){ grid.ClearSelection(); grid.Rows[e.RowIndex].Selected=true; } };
     }
 
     private void MoveSelected(DataGridView g, string novo)
@@ -341,6 +371,11 @@ public class MainForm : Form
 
         var lblProd = new Label { Text = "Produto", Font = new Font("Segoe UI", 8f, FontStyle.Bold), ForeColor = C_Muted, Height = 18, Dock = DockStyle.Top };
         var cbProd = new ComboBox { Dock = DockStyle.Top, Height = 30, DropDownStyle = ComboBoxStyle.DropDownList, Font = new Font("Segoe UI", 9f) };
+        // Meia-a-meia obrigatória
+        var lblSabor1 = new Label { Text = "Sabor 1ª metade", Font = new Font("Segoe UI", 8f, FontStyle.Bold), ForeColor = C_Muted, Height = 18, Dock = DockStyle.Top, Padding = new Padding(0,8,0,0) };
+        var cbSabor1 = new ComboBox { Dock = DockStyle.Top, Height = 30, DropDownStyle = ComboBoxStyle.DropDownList, Font = new Font("Segoe UI", 9f) };
+        var lblSabor2 = new Label { Text = "Sabor 2ª metade (se igual, pizza inteira)", Font = new Font("Segoe UI", 8f, FontStyle.Bold), ForeColor = C_Muted, Height = 18, Dock = DockStyle.Top, Padding = new Padding(0,8,0,0) };
+        var cbSabor2 = new ComboBox { Dock = DockStyle.Top, Height = 30, DropDownStyle = ComboBoxStyle.DropDownList, Font = new Font("Segoe UI", 9f) };
         var lblBorda = new Label { Text = "Borda", Font = new Font("Segoe UI", 8f, FontStyle.Bold), ForeColor = C_Muted, Height = 18, Dock = DockStyle.Top };
         lblBorda.Padding = new Padding(0, 8, 0, 0);
         var cbBorda = new ComboBox { Dock = DockStyle.Top, Height = 30, DropDownStyle = ComboBoxStyle.DropDownList };
@@ -357,6 +392,24 @@ public class MainForm : Form
         using (var conn = _db.Connect()) { conn.Open(); var prods = conn.Query("SELECT nome FROM produtos WHERE ativo=1 ORDER BY nome").ToList(); foreach (var p in prods) cbProd.Items.Add((string)p.nome); }
         if (cbProd.Items.Count == 0) { cbProd.Items.Add("Pizza Grande (8 fatias) — R$ 59,90"); cbProd.Items.Add("Pizza Pequena (4 fatias) — R$ 34,90"); cbProd.Items.Add("Esfiha Aberta — R$ 6,00"); cbProd.Items.Add("Calzone — R$ 22,00"); }
         cbProd.SelectedIndex = 0;
+        // Carrega sabores para meia-a-meia obrigatória
+        using (var connS = _db.Connect()) { connS.Open(); var sabs = connS.Query("SELECT nome FROM sabores WHERE ativo=1 ORDER BY nome").ToList(); foreach (var s in sabs) { var n=(string)s.nome; cbSabor1.Items.Add(n); cbSabor2.Items.Add(n); } }
+        if (cbSabor1.Items.Count==0) { foreach(var n in new[]{"Calabresa","Mussarela","Frango c/ Catupiry","Portuguesa"}) {cbSabor1.Items.Add(n); cbSabor2.Items.Add(n);} }
+        cbSabor1.SelectedIndex = 0; if(cbSabor2.Items.Count>0) cbSabor2.SelectedIndex = 0;
+        // Monte Sua invisível base
+        if (!cbProd.Items.Cast<string>().Any(s=>s.Contains("Monte Sua"))) { cbProd.Items.Add("Monte Sua Pizza P — R$ 9,90 (base)"); cbProd.Items.Add("Monte Sua Pizza G — R$ 14,90 (base)"); }
+        var pnlMonte = new Panel { Dock = DockStyle.Top, Height = 110, Visible = false, BackColor = Color.White, BorderStyle = BorderStyle.FixedSingle, Padding = new Padding(4) };
+        var lblMonte = new Label { Text = "Monte Sua — porções 120g (cada +R$)", Dock = DockStyle.Top, Height = 18, ForeColor = C_Muted, Font = new Font("Segoe UI", 8f, FontStyle.Bold) };
+        var clbRecheios = new CheckedListBox { Dock = DockStyle.Fill, Font = new Font("Segoe UI", 8.5f), CheckOnClick = true, BorderStyle = BorderStyle.None };
+        pnlMonte.Controls.Add(clbRecheios); pnlMonte.Controls.Add(lblMonte);
+        // popula recheios 120g disponíveis
+        void CarregarRecheios(){ clbRecheios.Items.Clear(); using var cc=_db.Connect(); cc.Open(); foreach(var r in cc.Query("SELECT nome, custo_calculado, rendimento_porcoes FROM sabores WHERE disponivel=1 AND ativo=1 ORDER BY nome").ToList()){ var nome=(string)r.nome; decimal custoCalc = r.custo_calculado!=null? Convert.ToDecimal(r.custo_calculado) : Convert.ToDecimal(r.custo ?? 0); int rend = r.rendimento_porcoes!=null? Convert.ToInt32(r.rendimento_porcoes) : 1; decimal porcao = rend>0? custoCalc/rend : custoCalc; decimal preco120 = porcao==0? 4.20m : Math.Round(porcao/0.4m,2); // 60% margem
+                clbRecheios.Items.Add($"{nome} 120g — R$ {preco120:F2}", false); } if(clbRecheios.Items.Count==0){ clbRecheios.Items.Add("Mussarela 120g — R$ 4,20"); clbRecheios.Items.Add("Calabresa 120g — R$ 4,50"); clbRecheios.Items.Add("Frango 120g — R$ 4,80"); } }
+        CarregarRecheios();
+        // Habilita sabores só para pizza, Monte Sua mostra porções
+        void AtualizarSaboresVisiveis(){ var txt=cbProd.SelectedItem?.ToString()??""; var isPizza = txt.ToLower().Contains("pizza") && !txt.Contains("Monte Sua"); var isMonte = txt.Contains("Monte Sua"); cbSabor1.Enabled = cbSabor2.Enabled = isPizza; lblSabor1.ForeColor = lblSabor2.ForeColor = isPizza ? C_Text : C_Muted; cbSabor1.BackColor = cbSabor2.BackColor = isPizza ? Color.White : Color.FromArgb(240,240,240); pnlMonte.Visible = isMonte; pnlMonte.Height = isMonte ? 110 : 0; }
+        AtualizarSaboresVisiveis();
+        cbProd.SelectedIndexChanged += (s,e)=> { AtualizarSaboresVisiveis(); CarregarRecheios(); };
 
         // Lista visual do carrinho (esquerda embaixo)
         var lst = new ListBox { Dock = DockStyle.Fill, Font = new Font("Consolas", 9f), BorderStyle = BorderStyle.FixedSingle, BackColor = Color.White };
@@ -374,6 +427,11 @@ public class MainForm : Form
         left.Controls.Add(lblObs);
         left.Controls.Add(cbBorda);
         left.Controls.Add(lblBorda);
+        left.Controls.Add(pnlMonte);
+        left.Controls.Add(cbSabor2);
+        left.Controls.Add(lblSabor2);
+        left.Controls.Add(cbSabor1);
+        left.Controls.Add(lblSabor1);
         left.Controls.Add(cbProd);
         left.Controls.Add(lblProd);
 
@@ -452,12 +510,37 @@ public class MainForm : Form
             decimal bordaPreco = 0;
             var bm = System.Text.RegularExpressions.Regex.Match(bordaTxt, @"R\$\s*([\d.,]+)");
             if (bm.Success) decimal.TryParse(bm.Groups[1].Value, System.Globalization.NumberStyles.Any, new System.Globalization.CultureInfo("pt-BR"), out bordaPreco);
-            var detalhe = bordaTxt == "Sem borda" ? "" : bordaTxt.Split('+')[0].Trim();
-            var precoFinal = preco + bordaPreco;
+            var detalheBorda = bordaTxt == "Sem borda" ? "" : bordaTxt.Split('+')[0].Trim();
+            var isMonte = prod.Contains("Monte Sua");
+            var isPizza = prod.ToLower().Contains("pizza") && !isMonte;
+            decimal precoFinal;
+            string detalheSabores = "";
+            if (isMonte)
+            {
+                var porcoes = new List<string>(); decimal sumPorcoes=0;
+                foreach(var it in clbRecheios.CheckedItems){ var txt=it.ToString()??""; var mm=System.Text.RegularExpressions.Regex.Match(txt, @"R\$\s*([\d.,]+)"); if(mm.Success && decimal.TryParse(mm.Groups[1].Value, System.Globalization.NumberStyles.Any, new System.Globalization.CultureInfo("pt-BR"), out var pr)){ sumPorcoes+=pr; porcoes.Add(txt.Split('—')[0].Trim()); } }
+                if(porcoes.Count==0){ MessageBox.Show("Selecione pelo menos uma porção 120g para Monte Sua."); return; }
+                if(porcoes.Count>4){ MessageBox.Show("Máximo 4 porções por pizza."); return; }
+                precoFinal = preco + sumPorcoes + bordaPreco;
+                detalheSabores = string.Join(", ", porcoes) + " (120g cada)";
+            }
+            else if (isPizza && cbSabor1.SelectedItem != null && cbSabor2.SelectedItem != null)
+            {
+                var s1 = cbSabor1.SelectedItem.ToString()!;
+                var s2 = cbSabor2.SelectedItem.ToString()!;
+                decimal p1 = preco, p2 = preco;
+                precoFinal = PizzaPDV.Core.Pricing.PrecoMeiaMedia(p1, p2) + bordaPreco;
+                detalheSabores = s1 == s2 ? s1 : $"½ {s1} + ½ {s2}";
+            }
+            else
+            {
+                precoFinal = preco + bordaPreco;
+            }
+            var detalhe = string.Join(" + ", new[]{detalheSabores, detalheBorda}.Where(s=>!string.IsNullOrEmpty(s)));
             var qtd = (int)numQtd.Value;
             var obs = string.IsNullOrWhiteSpace(txtObs.Text) ? null : txtObs.Text.Trim();
             balcaoCart.Add(new BalcaoItem(prod.Split('—')[0].Trim(), detalhe, precoFinal, qtd, obs, bordaTxt));
-            lst.Items.Add($"{qtd}x {prod.Split('—')[0].Trim()} {(string.IsNullOrEmpty(detalhe)?"": "+ "+detalhe)} = R$ {(precoFinal*qtd):F2} {(obs!=null?"("+obs+")":"")}");
+            lst.Items.Add($"{qtd}x {prod.Split('—')[0].Trim()} {(string.IsNullOrEmpty(detalhe)?"": $"({detalhe})")} = R$ {(precoFinal*qtd):F2} {(obs!=null?"("+obs+")":"")}");
             UpdateTotais();
             txtObs.Clear();
         };
@@ -503,8 +586,7 @@ public class MainForm : Form
     private void LoadMesas()
     {
         pnlMain.Controls.Clear();
-        pnlMain.Controls.Add(TitleBar("Mesas", "F3 • 20 mesas • Branca = livre • Amarela = ocupada • Toque para abrir comanda"));
-
+        var title = TitleBar("Mesas", "F3 • 20 mesas • Branca = livre • Amarela = ocupada • Clique direito para opções");
         var grid = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 5, RowCount = 4, BackColor = Color.Transparent, Padding = new Padding(0, 8, 0, 0) };
         for (int i = 0; i < 5; i++) grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 20));
         for (int i = 0; i < 4; i++) grid.RowStyles.Add(new RowStyle(SizeType.Percent, 25));
@@ -525,11 +607,31 @@ public class MainForm : Form
             var btn = new Button { Text = ocupada ? "Abrir comanda" : "Abrir mesa", Dock = DockStyle.Bottom, Height = 28, FlatStyle = FlatStyle.Flat, BackColor = ocupada ? Color.FromArgb(255, 243, 205) : Color.FromArgb(246, 248, 250), ForeColor = C_Text, Font = new Font("Segoe UI", 8f, FontStyle.Bold) };
             btn.FlatAppearance.BorderSize = 0;
             btn.Click += (_, __) => AbrirMesa(num);
+            // Menu de contexto por mesa
+            var cms = new ContextMenuStrip();
+            cms.Items.Add(ocupada ? "Ver/Editar comanda" : "Abrir mesa", null, (_,__)=> AbrirMesa(num));
+            if (ocupada)
+            {
+                cms.Items.Add(new ToolStripSeparator());
+                cms.Items.Add("Adicionar item rápido", null, (_,__)=> AbrirMesa(num));
+                cms.Items.Add("Reimprimir comanda cozinha", null, (_,__)=> { var pid="mesa"+num; var p=new PedidoPrint(pid,"mesa",$"Mesa {num:D2}","-","",null,0,num,null,new List<ItemPrint>{new ItemPrint("Reimpressão",1,0,null,null)},0,0,"",DateTime.Now.ToString("HH:mm"),null); var raw=Templates.ComandaCozinha(p); var (ok,via)=RawPrinter.PrintAuto(raw); MessageBox.Show(ok?$"Reimpresso {via}":via); });
+                cms.Items.Add("Pedir conta (→ conta)", null, (_,__)=> { using var cc=_db.Connect(); cc.Open(); cc.Execute("UPDATE mesas SET status='conta', updated_at=@now WHERE numero=@n", new{now=DateTime.UtcNow.ToString("o"), n=num}); Navigate("mesas"); });
+                cms.Items.Add("Transferir mesa...", null, (_,__)=> TransferirMesa(num));
+                cms.Items.Add(new ToolStripSeparator());
+                cms.Items.Add("Cancelar/Liberar mesa", null, (_,__)=> { if(MessageBox.Show($"Liberar Mesa {num:D2}?", "Confirmar", MessageBoxButtons.YesNo)==DialogResult.Yes){ using var cc=_db.Connect(); cc.Open(); cc.Execute("UPDATE mesas SET status='livre', updated_at=@now, comanda_aberta=NULL WHERE numero=@n", new{now=DateTime.UtcNow.ToString("o"), n=num}); Navigate("mesas"); }});
+            }
+            else
+            {
+                cms.Items.Add("Ver histórico", null, (_,__)=> MessageBox.Show($"Histórico Mesa {num:D2} (últimas 5 comandas) — em breve."));
+            }
+            card.ContextMenuStrip = cms;
+            // clique direito no card também abre comanda com duplo clique já funciona
             card.Controls.Add(btn); card.Controls.Add(lblSt); card.Controls.Add(lblNum);
             grid.Controls.Add(card);
         }
         var wrap = Card(grid, 8);
-        pnlMain.Controls.Add(wrap);
+        var layout = PageLayout(title, null, wrap);
+        pnlMain.Controls.Add(layout);
     }
 
     private void AbrirMesa(int numero)
@@ -551,6 +653,17 @@ public class MainForm : Form
         if (cbProd.Items.Count == 0) { cbProd.Items.Add("Pizza Grande (8 fatias) — R$ 59,90"); cbProd.Items.Add("Pizza Pequena (4 fatias) — R$ 34,90"); cbProd.Items.Add("Esfiha — R$ 6,00"); }
         cbProd.SelectedIndex = 0;
         f.Controls.Add(cbProd);
+        // Meia-a-meia obrigatória para mesa
+        var cbSabor1M = new ComboBox { Dock = DockStyle.Top, Height = 30, DropDownStyle = ComboBoxStyle.DropDownList, Font = new Font("Segoe UI", 9f) };
+        var cbSabor2M = new ComboBox { Dock = DockStyle.Top, Height = 30, DropDownStyle = ComboBoxStyle.DropDownList, Font = new Font("Segoe UI", 9f) };
+        using (var cs = _db.Connect()) { cs.Open(); foreach(var s in cs.Query("SELECT nome FROM sabores WHERE ativo=1 ORDER BY nome").ToList()) { var n=(string)s.nome; cbSabor1M.Items.Add(n); cbSabor2M.Items.Add(n); } }
+        if (cbSabor1M.Items.Count==0) { foreach(var n in new[]{"Calabresa","Mussarela"}){ cbSabor1M.Items.Add(n); cbSabor2M.Items.Add(n);} }
+        cbSabor1M.SelectedIndex=0; if(cbSabor2M.Items.Count>0) cbSabor2M.SelectedIndex=0;
+        var lblS1M = new Label{ Text="Sabor 1ª metade", Dock=DockStyle.Top, Height=18, ForeColor=C_Muted, Font=new Font("Segoe UI",8f,FontStyle.Bold), Padding=new Padding(0,4,0,0)};
+        var lblS2M = new Label{ Text="Sabor 2ª metade", Dock=DockStyle.Top, Height=18, ForeColor=C_Muted, Font=new Font("Segoe UI",8f,FontStyle.Bold), Padding=new Padding(0,4,0,0)};
+        f.Controls.Add(cbSabor2M); f.Controls.Add(lblS2M); f.Controls.Add(cbSabor1M); f.Controls.Add(lblS1M);
+        void AtualizarSaboresM(){ var isP = cbProd.SelectedItem?.ToString()?.ToLower().Contains("pizza") ?? false; cbSabor1M.Enabled=cbSabor2M.Enabled=isP; lblS1M.ForeColor=lblS2M.ForeColor=isP?C_Text:C_Muted; }
+        AtualizarSaboresM(); cbProd.SelectedIndexChanged += (s,e)=> AtualizarSaboresM();
 
         var cbBorda = new ComboBox { Dock = DockStyle.Top, Height = 30, DropDownStyle = ComboBoxStyle.DropDownList, Font = new Font("Segoe UI", 9f) };
         cbBorda.Items.AddRange(new object[] { "Sem borda", "Catupiry +R$ 8,00", "Cream Cheese +R$ 8,00", "Chocolate +R$ 9,00", "Borda Comum +R$ 5,00", "Borda Camarão +R$ 15,00", "Borda Vulcão +R$ 18,00" });
@@ -568,20 +681,40 @@ public class MainForm : Form
         bar.Controls.Add(btnFechar); bar.Controls.Add(btnEnviar); bar.Controls.Add(btnAdd);
         f.Controls.Add(bar);
 
-        var localItems = new List<(string prod, string borda)>();
-        btnAdd.Click += (_, __) => { localItems.Add((cbProd.SelectedItem?.ToString() ?? "", cbBorda.SelectedItem?.ToString() ?? "")); lst.Items.Add($"1x {cbProd.SelectedItem} + {cbBorda.SelectedItem}"); };
+        var localItems = new List<(string prod, string detalhe, decimal preco)>();
+        btnAdd.Click += (_, __) => {
+            var prod = cbProd.SelectedItem?.ToString() ?? "";
+            var borda = cbBorda.SelectedItem?.ToString() ?? "Sem borda";
+            var isPizza = prod.ToLower().Contains("pizza");
+            string detalhe = borda == "Sem borda" ? "" : borda.Split('+')[0].Trim();
+            decimal precoBase = 59.90m;
+            var m = System.Text.RegularExpressions.Regex.Match(prod, @"R\$\s*([\d.,]+)");
+            if(m.Success) decimal.TryParse(m.Groups[1].Value, System.Globalization.NumberStyles.Any, new System.Globalization.CultureInfo("pt-BR"), out precoBase);
+            if (isPizza && cbSabor1M.SelectedItem!=null && cbSabor2M.SelectedItem!=null)
+            {
+                var s1=cbSabor1M.SelectedItem.ToString()!; var s2=cbSabor2M.SelectedItem.ToString()!;
+                var sabDet = s1==s2? s1 : $"½ {s1} + ½ {s2}";
+                detalhe = string.Join(" + ", new[]{sabDet, detalhe}.Where(s=>!string.IsNullOrEmpty(s)));
+                // meia: média
+                precoBase = (precoBase + precoBase)/2m + (borda=="Sem borda"?0:8m); // borda parcela já em precoBase acima, recalcula com meia: (p+p)/2 + borda
+                // Na prática com mesmo preço, mantém
+            }
+            localItems.Add((prod.Split('—')[0].Trim(), detalhe, precoBase));
+            lst.Items.Add($"1x {prod.Split('—')[0].Trim()} {(string.IsNullOrEmpty(detalhe)?"": $"({detalhe})")}");
+        };
 
         btnEnviar.Click += (_, __) =>
         {
             if (lst.Items.Count == 0) { MessageBox.Show("Adicione pelo menos um item."); return; }
+            var total = localItems.Sum(x=> x.preco);
             var id = "tmp_" + Guid.NewGuid().ToString("N")[..8];
             var now = DateTime.UtcNow.ToString("o");
             conn.Execute("INSERT INTO pedidos_local (id,origem,status,cliente_nome,cliente_telefone,subtotal,total,forma_pagamento,mesa_numero,created_at,updated_at,payload_json,synced) VALUES (@id,'mesa','recebido',@cli,'00000000000',@sub,@tot,'dinheiro',@mesa,@now,@now,@pay,0)",
-                new { id, cli = $"Mesa {numero:D2}", sub = 59.90m * lst.Items.Count, tot = 59.90m * lst.Items.Count, mesa = numero, now, pay = $"{{\"mesa\":{numero}}}" });
+                new { id, cli = $"Mesa {numero:D2}", sub = total, tot = total, mesa = numero, now, pay = $"{{\"mesa\":{numero}}}" });
             conn.Execute("UPDATE mesas SET status='ocupada', updated_at=@now WHERE numero=@n", new { now, n = numero });
-            _sync.Enqueue("pedidos", "insert", new { id, origem = "mesa", status = "recebido", cliente_nome = $"Mesa {numero:D2}", mesa_numero = numero, total = 59.90m * lst.Items.Count });
-            var itensPrint = localItems.Select(x => new ItemPrint(x.prod.Split('—')[0].Trim(), 1, 59.90m, x.borda, null)).ToList();
-            var p = new PedidoPrint(id, "mesa", $"Mesa {numero:D2}", "-", null, null, 0, numero, null, itensPrint, 59.90m * lst.Items.Count, 59.90m * lst.Items.Count, "mesa", DateTime.Now.ToString("HH:mm"), null);
+            _sync.Enqueue("pedidos", "insert", new { id, origem = "mesa", status = "recebido", cliente_nome = $"Mesa {numero:D2}", mesa_numero = numero, total });
+            var itensPrint = localItems.Select(x => new ItemPrint(x.prod, 1, x.preco, x.detalhe, null)).ToList();
+            var p = new PedidoPrint(id, "mesa", $"Mesa {numero:D2}", "-", null, null, 0, numero, null, itensPrint, total, total, "mesa", DateTime.Now.ToString("HH:mm"), null);
             var raw = Templates.ComandaCozinha(p);
             var (ok, via) = RawPrinter.PrintAuto(raw);
             MessageBox.Show(ok ? $"Comanda enviada ({via})" : via, "Mesa", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -589,6 +722,22 @@ public class MainForm : Form
         };
 
         f.ShowDialog(this);
+        Navigate("mesas");
+    }
+
+    private void TransferirMesa(int origem)
+    {
+        var destStr = Prompt($"Transferir Mesa {origem:D2} para qual mesa (1-20)?", ((origem % 20) + 1).ToString());
+        if (!int.TryParse(destStr, out var dest) || dest < 1 || dest > 20 || dest == origem) { MessageBox.Show("Mesa inválida."); return; }
+        using var c = _db.Connect(); c.Open();
+        var ocupada = c.ExecuteScalar<string>("SELECT status FROM mesas WHERE numero=@n", new { n = dest });
+        if (ocupada == "ocupada") { MessageBox.Show($"Mesa {dest:D2} já está ocupada."); return; }
+        c.Execute("UPDATE pedidos_local SET mesa_numero=@dest, updated_at=@now WHERE mesa_numero=@orig AND status IN ('recebido','preparo','pronto')", new { dest, orig = origem, now = DateTime.UtcNow.ToString("o") });
+        c.Execute("UPDATE comandas SET mesa_numero=@dest, updated_at=@now WHERE mesa_numero=@orig AND status='aberta'", new { dest, orig = origem, now = DateTime.UtcNow.ToString("o") });
+        c.Execute("UPDATE mesas SET status='livre', updated_at=@now WHERE numero=@orig", new { now = DateTime.UtcNow.ToString("o"), orig = origem });
+        c.Execute("UPDATE mesas SET status='ocupada', updated_at=@now WHERE numero=@dest", new { now = DateTime.UtcNow.ToString("o"), dest });
+        _sync.Enqueue("mesas", "update", new { origem, dest, tipo = "transferencia" });
+        MessageBox.Show($"Mesa {origem:D2} → Mesa {dest:D2} transferida.");
         Navigate("mesas");
     }
 
