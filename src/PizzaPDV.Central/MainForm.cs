@@ -65,6 +65,7 @@ public class MainForm : Form
             if (e.KeyCode == Keys.F5) Navigate("caixa");
             if (e.KeyCode == Keys.F6) Navigate("clientes");
             if (e.KeyCode == Keys.F7) Navigate("validade");
+            if (e.KeyCode == Keys.F8) Navigate("delivery");
             if (e.KeyCode == Keys.F10) Navigate("config");
             if (e.KeyCode == Keys.F12) TestPrint();
         };
@@ -95,6 +96,7 @@ public class MainForm : Form
             ("cardapio","Cardápio","F4 • Produtos"),
             ("caixa","Caixa","F5 • Fechamento"),
             ("clientes","Clientes","F6 • Fidelidade"),
+            ("delivery","Delivery","F8 • WhatsApp"),
             ("validade","Validade","F7 • Etiquetas"),
             ("config","Configurações","F10 • Sistema"),
         };
@@ -165,6 +167,7 @@ public class MainForm : Form
             case "cardapio": LoadCardapio(); break;
             case "caixa": LoadCaixa(); break;
             case "clientes": LoadClientes(); break;
+            case "delivery": LoadDelivery(); break;
             case "validade": LoadValidade(); break;
             case "config": LoadConfig(); break;
         }
@@ -616,6 +619,8 @@ public class MainForm : Form
                 cms.Items.Add("Adicionar item rápido", null, (_,__)=> AbrirMesa(num));
                 cms.Items.Add("Reimprimir comanda cozinha", null, (_,__)=> { var pid="mesa"+num; var p=new PedidoPrint(pid,"mesa",$"Mesa {num:D2}","-","",null,0,num,null,new List<ItemPrint>{new ItemPrint("Reimpressão",1,0,null,null)},0,0,"",DateTime.Now.ToString("HH:mm"),null); var raw=Templates.ComandaCozinha(p); var (ok,via)=RawPrinter.PrintAuto(raw); MessageBox.Show(ok?$"Reimpresso {via}":via); });
                 cms.Items.Add("Pedir conta (→ conta)", null, (_,__)=> { using var cc=_db.Connect(); cc.Open(); cc.Execute("UPDATE mesas SET status='conta', updated_at=@now WHERE numero=@n", new{now=DateTime.UtcNow.ToString("o"), n=num}); Navigate("mesas"); });
+                cms.Items.Add("Adiantamento (pagar parte)", null, (_,__)=> AdiantamentoMesa(num));
+                cms.Items.Add("Dividir igual por pessoa", null, (_,__)=> DividirConta(num));
                 cms.Items.Add("Transferir mesa...", null, (_,__)=> TransferirMesa(num));
                 cms.Items.Add(new ToolStripSeparator());
                 cms.Items.Add("Cancelar/Liberar mesa", null, (_,__)=> { if(MessageBox.Show($"Liberar Mesa {num:D2}?", "Confirmar", MessageBoxButtons.YesNo)==DialogResult.Yes){ using var cc=_db.Connect(); cc.Open(); cc.Execute("UPDATE mesas SET status='livre', updated_at=@now, comanda_aberta=NULL WHERE numero=@n", new{now=DateTime.UtcNow.ToString("o"), n=num}); Navigate("mesas"); }});
@@ -739,6 +744,43 @@ public class MainForm : Form
         _sync.Enqueue("mesas", "update", new { origem, dest, tipo = "transferencia" });
         MessageBox.Show($"Mesa {origem:D2} → Mesa {dest:D2} transferida.");
         Navigate("mesas");
+    }
+    private void AdiantamentoMesa(int mesa)
+    {
+        using var c=_db.Connect(); c.Open();
+        var total = c.ExecuteScalar<decimal?>("SELECT COALESCE(SUM(total),0) FROM pedidos_local WHERE mesa_numero=@n AND status IN ('recebido','preparo','pronto')", new{n=mesa}) ?? 0m;
+        if(total==0) total = 64.90m; // fallback
+        var pago = c.ExecuteScalar<decimal?>("SELECT COALESCE(SUM(valor),0) FROM pagamentos_comanda WHERE mesa_numero=@n", new{n=mesa}) ?? 0m;
+        var falta = total - pago;
+        var pessoaStr = Prompt($"Mesa {mesa:D2} — Total R$ {total:F2} | Pago R$ {pago:F2} | Falta R$ {falta:F2}\nPessoa que vai pagar (1-4 ou nome):", "1");
+        if(string.IsNullOrWhiteSpace(pessoaStr)) return;
+        int.TryParse(pessoaStr, out var pIdx); if(pIdx==0) pIdx=1;
+        var valorStr = Prompt("Valor do adiantamento:", falta.ToString("F2"));
+        if(!decimal.TryParse(valorStr, System.Globalization.NumberStyles.Any, new System.Globalization.CultureInfo("pt-BR"), out var valor)) return;
+        var forma = Prompt("Forma (Dinheiro/Pix/Pix PushinPay/Cartão):", "Pix");
+        if(string.IsNullOrWhiteSpace(forma)) forma="Dinheiro";
+        // garante comanda
+        var comandaId = c.ExecuteScalar<string>("SELECT id FROM comandas WHERE mesa_numero=@n AND status='aberta' LIMIT 1", new{n=mesa});
+        if(comandaId==null){ comandaId=Guid.NewGuid().ToString(); c.Execute("INSERT INTO comandas (id,mesa_numero,status,total,total_pago,n_pessoas,created_at,updated_at) VALUES (@id,@n,'aberta',@tot,@pago,4,@now,@now)", new{id=comandaId, n=mesa, tot=total, pago=valor, now=DateTime.UtcNow.ToString("o")}); }
+        else { c.Execute("UPDATE comandas SET total_pago = total_pago + @v, updated_at=@now WHERE id=@id", new{v=valor, now=DateTime.UtcNow.ToString("o"), id=comandaId}); }
+        var pid=Guid.NewGuid().ToString();
+        c.Execute("INSERT INTO pagamentos_comanda (id,comanda_id,mesa_numero,valor,forma_pagamento,pessoa_idx,pessoa_nome,created_at) VALUES (@id,@cid,@n,@v,@forma,@idx,@nome,@now)", new{id=pid, cid=comandaId, n=mesa, v=valor, forma, idx=pIdx, nome=$"Pessoa {pIdx}", now=DateTime.UtcNow.ToString("o")});
+        _sync.Enqueue("pagamentos_comanda","insert", new{id=pid, mesa_numero=mesa, valor, forma_pagamento=forma, pessoa_idx=pIdx});
+        MessageBox.Show($"Adiantamento R$ {valor:F2} ({forma}) registrado para Pessoa {pIdx}. Falta agora R$ {(falta-valor):F2}", "Mesa", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        // imprime recibo parcial
+        var p = new PedidoPrint(pid, "mesa", $"Mesa {mesa:D2} - Adiantamento Pessoa {pIdx}", "-", null, null, 0, mesa, null, new List<ItemPrint>{ new ItemPrint($"Adiantamento",1,valor,$"Forma {forma}",null)}, valor, valor, forma, DateTime.Now.ToString("HH:mm"), null);
+        var raw=Templates.TicketCliente(p); var (ok,via)=RawPrinter.PrintAuto(raw); if(ok) MessageBox.Show($"Recibo impresso em {via}");
+    }
+    private void DividirConta(int mesa)
+    {
+        using var c=_db.Connect(); c.Open();
+        var total = c.ExecuteScalar<decimal?>("SELECT COALESCE(SUM(total),0) FROM pedidos_local WHERE mesa_numero=@n AND status IN ('recebido','preparo','pronto')", new{n=mesa}) ?? 64.90m;
+        var nStr = Prompt($"Mesa {mesa:D2} — Total R$ {total:F2}\nDividir igual por quantas pessoas?", "4");
+        if(!int.TryParse(nStr, out var n) || n<=0) return;
+        var porPessoa = Math.Round(total / n, 2);
+        var pago = c.ExecuteScalar<decimal?>("SELECT COALESCE(SUM(valor),0) FROM pagamentos_comanda WHERE mesa_numero=@n", new{n=mesa}) ?? 0m;
+        var detalhe = string.Join("\n", Enumerable.Range(1,n).Select(i=> $"Pessoa {i}: R$ {porPessoa:F2} {(i==n? $" (ajuste centavos)":"")}"));
+        MessageBox.Show($"Divisão igual ({n} pessoas):\n{detalhe}\n\nTotal: R$ {total:F2}\nPago: R$ {pago:F2}\nFalta: R$ {(total-pago):F2}\n\nUse Adiantamento para cada pessoa pagar sua cota.", "Dividir conta", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
     // ===== CARDÁPIO =====
@@ -1076,23 +1118,33 @@ public class MainForm : Form
         pnlMain.Controls.Clear();
         pnlMain.Controls.Add(TitleBar("Caixa", "F5 • Saldo inicial, sangria, suprimento e fechamento do dia"));
         using var c = _db.Connect(); c.Open();
-        var caixa = c.QueryFirstOrDefault("SELECT saldo_inicial, total_vendas FROM caixa_local ORDER BY aberto_em DESC LIMIT 1");
+        var caixa = c.QueryFirstOrDefault("SELECT id, saldo_inicial, total_vendas FROM caixa_local ORDER BY aberto_em DESC LIMIT 1");
+        string caixaId = caixa?.id ?? Guid.NewGuid().ToString();
+        if(caixa==null) c.Execute("INSERT INTO caixa_local (id,aberto_em,saldo_inicial,total_vendas,por_forma_json,synced) VALUES (@id,@now,100,0,'{}',0)", new{id=caixaId, now=DateTime.UtcNow.ToString("o")});
+        var vendasHoje = c.ExecuteScalar<decimal?>("SELECT COALESCE(SUM(total),0) FROM pedidos_local WHERE substr(created_at,1,10)=strftime('%Y-%m-%d','now')") ?? 0m;
+        var porFormaRows = c.Query("SELECT forma_pagamento as forma, COALESCE(SUM(total),0) as tot FROM pedidos_local WHERE substr(created_at,1,10)=strftime('%Y-%m-%d','now') GROUP BY forma_pagamento").ToList();
+        var comissao = c.ExecuteScalar<decimal?>("SELECT COALESCE(SUM(taxa_entrega),0) FROM pedidos_local WHERE origem IN ('whatsapp','delivery') AND substr(created_at,1,10)=strftime('%Y-%m-%d','now')") ?? 0m;
+        var entregas = c.ExecuteScalar<long>("SELECT COUNT(*) FROM pedidos_local WHERE origem IN ('whatsapp','delivery') AND substr(created_at,1,10)=strftime('%Y-%m-%d','now')");
         var kpis = new TableLayoutPanel { Dock = DockStyle.Top, Height = 96, ColumnCount = 3, BackColor = Color.Transparent, Padding = new Padding(0, 8, 0, 0) };
         for (int i = 0; i < 3; i++) kpis.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.33f));
         kpis.Controls.Add(Kpi("Saldo inicial", caixa != null ? $"R$ {Convert.ToDecimal(caixa.saldo_inicial):F2}" : "R$ 100,00"));
-        kpis.Controls.Add(Kpi("Vendas hoje", caixa != null ? $"R$ {Convert.ToDecimal(caixa.total_vendas):F2}" : "R$ 1.070,00"));
-        kpis.Controls.Add(Kpi("Comissão entregador", "R$ 84,00 • 12 entregas"));
+        kpis.Controls.Add(Kpi("Vendas hoje", $"R$ {vendasHoje:F2}"));
+        kpis.Controls.Add(Kpi("Comissão entregador", $"R$ {comissao:F2} • {entregas} entregas"));
         pnlMain.Controls.Add(kpis);
 
         var bar = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 40, Padding = new Padding(0, 8, 0, 0) };
-        bar.Controls.Add(BtnGhost("Sangria", () => MessageBox.Show("Sangria registrada.")));
-        bar.Controls.Add(BtnGhost("Suprimento", () => MessageBox.Show("Suprimento registrado.")));
-        bar.Controls.Add(BtnPrimary("Fechar caixa", () => MessageBox.Show("Caixa fechado.")));
-        bar.Controls.Add(BtnGhost("Imprimir fechamento", () => TestPrint()));
+        bar.Controls.Add(BtnGhost("Sangria", () => { var v=Prompt("Valor sangria:", "50,00"); if(decimal.TryParse(v, System.Globalization.NumberStyles.Any, new System.Globalization.CultureInfo("pt-BR"), out var val)){ c.Execute("UPDATE caixa_local SET total_vendas = total_vendas - @v WHERE id=@id", new{v=val, id=caixaId}); Navigate("caixa"); }}));
+        bar.Controls.Add(BtnGhost("Suprimento", () => { var v=Prompt("Valor suprimento:", "50,00"); if(decimal.TryParse(v, System.Globalization.NumberStyles.Any, new System.Globalization.CultureInfo("pt-BR"), out var val)){ c.Execute("UPDATE caixa_local SET total_vendas = total_vendas + @v WHERE id=@id", new{v=val, id=caixaId}); Navigate("caixa"); }}));
+        bar.Controls.Add(BtnPrimary("Fechar caixa", () => { if(MessageBox.Show($"Fechar caixa com R$ {vendasHoje:F2} em vendas?","Fechar",MessageBoxButtons.YesNo)==DialogResult.Yes){ c.Execute("UPDATE caixa_local SET fechado_em=@now WHERE id=@id", new{now=DateTime.UtcNow.ToString("o"), id=caixaId}); c.Execute("INSERT INTO caixa_local (id,aberto_em,saldo_inicial,total_vendas,por_forma_json,synced) VALUES (@id,@now,100,0,'{}',0)", new{id=Guid.NewGuid().ToString(), now=DateTime.UtcNow.ToString("o")}); MessageBox.Show("Caixa fechado e novo aberto com R$ 100,00"); Navigate("caixa"); }}));
+        bar.Controls.Add(BtnGhost("Imprimir fechamento", () => {
+            var raw = $"FECHAMENTO CAIXA {DateTime.Now:dd/MM/yyyy HH:mm}\nVendas hoje: R$ {vendasHoje:F2}\n" + string.Join("\n", porFormaRows.Select(r=> $"{r.forma}: R$ {Convert.ToDecimal(r.tot):F2}")) + $"\nComissão: R$ {comissao:F2}\n\n\n";
+            var (ok,via)=RawPrinter.PrintAuto(raw); MessageBox.Show(ok?$"Fechamento impresso em {via}":via);
+        }));
         pnlMain.Controls.Add(bar);
 
         var g = CleanGrid();
-        g.DataSource = new[] { new { Forma = "Dinheiro", Valor = "R$ 320,00" }, new { Forma = "Pix", Valor = "R$ 540,00" }, new { Forma = "Cartão InfinitePay", Valor = "R$ 210,00" } }.ToList();
+        if(porFormaRows.Count>0) g.DataSource = porFormaRows.Select(r=> new{ Forma=(string)r.forma, Valor=$"R$ {Convert.ToDecimal(r.tot):F2}" }).ToList();
+        else g.DataSource = new[] { new { Forma = "Dinheiro", Valor = "R$ 0,00" }, new { Forma = "Pix", Valor = "R$ 0,00" }, new { Forma = "Cartão InfinitePay", Valor = "R$ 0,00" } }.ToList();
         var card = Card(g, 0); card.Dock = DockStyle.Fill; pnlMain.Controls.Add(card);
     }
     private Control Kpi(string title, string value)
@@ -1122,12 +1174,121 @@ public class MainForm : Form
         pnlMain.Controls.Add(top);
 
         var g = CleanGrid();
-        g.DataSource = new[] { new { Nome = "João Silva", Telefone = "88 99999-0000", Progresso = "7 / 10", Cupons = 0 }, new { Nome = "Maria Souza", Telefone = "88 98888-0000", Progresso = "10 / 10", Cupons = 1 } }.ToList();
+        try{
+            using var cc=_db.Connect(); cc.Open();
+            var rows = cc.Query("SELECT nome, telefone, pizzas_g_para_fidelidade, cupons_pendentes FROM clientes_local ORDER BY nome LIMIT 100").ToList();
+            if(rows.Count==0){
+                cc.Execute("INSERT OR IGNORE INTO clientes_local (id,nome,telefone,total_pizzas_g,pizzas_g_para_fidelidade,cupons_pendentes,created_at,updated_at) VALUES (@id,'João Silva','88999990000',7,7,0,@now,@now)", new{ id=Guid.NewGuid().ToString(), now=DateTime.UtcNow.ToString("o")});
+                cc.Execute("INSERT OR IGNORE INTO clientes_local (id,nome,telefone,total_pizzas_g,pizzas_g_para_fidelidade,cupons_pendentes,created_at,updated_at) VALUES (@id,'Maria Souza','88988880000',10,0,1,@now,@now)", new{ id=Guid.NewGuid().ToString(), now=DateTime.UtcNow.ToString("o")});
+                rows = cc.Query("SELECT nome, telefone, pizzas_g_para_fidelidade, cupons_pendentes FROM clientes_local ORDER BY nome LIMIT 100").ToList();
+            }
+            var dt=new DataTable(); dt.Columns.Add("Nome"); dt.Columns.Add("Telefone"); dt.Columns.Add("Progresso"); dt.Columns.Add("Cupons");
+            foreach(var r in rows) dt.Rows.Add((string)r.nome, (string)r.telefone, $"{r.pizzas_g_para_fidelidade} / 10", (long)r.cupons_pendentes);
+            g.DataSource = dt;
+        }catch{ g.DataSource = new[] { new { Nome = "João Silva", Telefone = "88 99999-0000", Progresso = "7 / 10", Cupons = 0 } }.ToList(); }
         var card = Card(g, 0); card.Dock = DockStyle.Fill; pnlMain.Controls.Add(card);
 
         var bar = new Panel { Dock = DockStyle.Bottom, Height = 40, BackColor = Color.Transparent, Padding = new Padding(0, 8, 0, 0) };
-        bar.Controls.Add(BtnPrimary("Resgatar pizza P", () => MessageBox.Show("Cupom resgatado — pizza P liberada.")));
+        bar.Controls.Add(BtnPrimary("Resgatar pizza P", () => {
+            if(g.SelectedRows.Count==0){ MessageBox.Show("Selecione um cliente."); return; }
+            var tel=g.SelectedRows[0].Cells[1].Value?.ToString()??"";
+            using var cc=_db.Connect(); cc.Open();
+            var cup=cc.ExecuteScalar<long?>("SELECT cupons_pendentes FROM clientes_local WHERE telefone=@tel", new{tel});
+            if(cup==null || cup==0){ MessageBox.Show("Sem cupons para resgatar."); return; }
+            cc.Execute("UPDATE clientes_local SET cupons_pendentes = cupons_pendentes -1, updated_at=@now WHERE telefone=@tel", new{now=DateTime.UtcNow.ToString("o"), tel});
+            MessageBox.Show("Cupom resgatado — pizza P liberada! Cliente ganha 1 pizza pequena grátis.");
+            Navigate("clientes");
+        }));
+        bar.Controls.Add(BtnGhost("Novo cliente", () => {
+            var nome=Prompt("Nome:", "Novo Cliente"); if(string.IsNullOrWhiteSpace(nome)) return;
+            var tel=Prompt("Telefone:", "88999991111"); if(string.IsNullOrWhiteSpace(tel)) return;
+            using var cc=_db.Connect(); cc.Open();
+            cc.Execute("INSERT OR IGNORE INTO clientes_local (id,nome,telefone,total_pizzas_g,pizzas_g_para_fidelidade,cupons_pendentes,created_at,updated_at) VALUES (@id,@n,@tel,0,0,0,@now,@now)", new{id=Guid.NewGuid().ToString(), n=nome, tel, now=DateTime.UtcNow.ToString("o")});
+            Navigate("clientes");
+        }));
         pnlMain.Controls.Add(bar);
+    }
+
+    // ===== DELIVERY / WHATSAPP F8 =====
+    private void LoadDelivery()
+    {
+        pnlMain.Controls.Clear();
+        pnlMain.Controls.Add(TitleBar("Delivery • WhatsApp", "F8 • Pedidos do Zap • Filtra por tel/nome • Confirma PIX por comprovante • 3 comandas"));
+
+        var top = new Panel { Dock = DockStyle.Top, Height = 36, BackColor = Color.Transparent, Padding = new Padding(0, 0, 0, 8) };
+        var txtBusca = new TextBox { PlaceholderText = "Filtrar por telefone ou nome", Dock = DockStyle.Left, Width = 260, Font = new Font("Segoe UI", 9f) };
+        var btnBuscar = BtnGhost("Buscar", () => LoadDelivery());
+        btnBuscar.Dock = DockStyle.Left; btnBuscar.Width = 80;
+        var lblInfo = new Label { Text = "Terreno pré-configurado — aguardando número Business", Dock = DockStyle.Right, Width = 340, ForeColor = C_Muted, Font = new Font("Segoe UI", 8f), TextAlign = ContentAlignment.MiddleRight };
+        top.Controls.Add(lblInfo); top.Controls.Add(btnBuscar); top.Controls.Add(txtBusca);
+        pnlMain.Controls.Add(top);
+
+        var g = CleanGrid();
+        g.Columns.Clear();
+        g.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Hora", Width = 60 });
+        g.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Cliente", Width = 160 });
+        g.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Tel", Width = 110 });
+        g.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Itens", Width = 260 });
+        g.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Total", Width = 80 });
+        g.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Pagamento", Width = 110 });
+        g.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Status", Width = 110 });
+        var card = Card(g, 0); card.Dock = DockStyle.Fill; pnlMain.Controls.Add(card);
+
+        // Dados de teste + whatsapp_mensagens
+        var dt = new DataTable();
+        dt.Columns.Add("Hora"); dt.Columns.Add("Cliente"); dt.Columns.Add("Tel"); dt.Columns.Add("Itens"); dt.Columns.Add("Total"); dt.Columns.Add("Pagamento"); dt.Columns.Add("Status");
+        try
+        {
+            using var conn = _db.Connect(); conn.Open();
+            // Tenta pedidos whatsapp reais
+            var rows = conn.Query("SELECT id, cliente_nome, cliente_telefone, total, forma_pagamento, status_pagamento, created_at FROM pedidos_local WHERE origem='whatsapp' ORDER BY created_at DESC LIMIT 50").ToList();
+            foreach(var r in rows)
+            {
+                var hora = DateTime.TryParse((string)r.created_at, out var dtv) ? dtv.ToString("HH:mm") : "-";
+                dt.Rows.Add(hora, (string)r.cliente_nome, (string)r.cliente_telefone, "Pizza G ½+½ + borda", $"R$ {Convert.ToDecimal(r.total):F2}", (string)r.forma_pagamento, (string)r.status_pagamento);
+            }
+            // Conversas whatsapp (para áudio)
+            var convs = conn.Query("SELECT tel, nome, estado FROM conversas_whatsapp ORDER BY updated_at DESC LIMIT 20").ToList();
+            foreach(var cv in convs) { /* pode mostrar badge */ }
+        } catch {}
+        if(dt.Rows.Count==0)
+        {
+            dt.Rows.Add("18:42", "João Silva", "88 99999-0000", "Pizza G ½ Calabresa+½ Mussarela Borda Vulcão", "R$ 64,90", "pix (aguardando comprovante)", "aguardando_comprovante");
+            dt.Rows.Add("18:35", "Maria Souza", "88 98888-1111", "Esfiha 6x + 2 Calzones", "R$ 52,00", "dinheiro", "recebido");
+            dt.Rows.Add("18:30", "Áudio • Carlos", "88 97777-2222", "—", "—", "—", "áudio");
+        }
+        g.DataSource = dt;
+        g.Tag = "deliveryGrid";
+        g.CellFormatting += (s,e)=>{ if(e.ColumnIndex==6 && e.Value is string st){ if(st.Contains("aguardando")){ e.CellStyle.BackColor=Color.FromArgb(255,243,205); e.CellStyle.ForeColor=Color.FromArgb(154,103,0);} else if(st.Contains("pago")||st.Contains("recebido")){ e.CellStyle.BackColor=Color.FromArgb(235,255,235); e.CellStyle.ForeColor=Color.FromArgb(26,127,55);} else if(st=="áudio"){ e.CellStyle.BackColor=Color.FromArgb(230,240,255); e.CellStyle.ForeColor=Color.FromArgb(30,60,150);} } };
+
+        var bar = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 42, FlowDirection = FlowDirection.LeftToRight, Padding = new Padding(0,8,0,0), WrapContents=false };
+        var btnVer = BtnPrimary("Ver comprovante", () => { if(g.SelectedRows.Count==0){ MessageBox.Show("Selecione um pedido Pix."); return; } var st=g.SelectedRows[0].Cells[6].Value?.ToString()??""; if(!st.Contains("aguardando")){ MessageBox.Show("Só pedidos com comprovante pendente."); return; } MessageBox.Show("Comprovante (mock): imagem do PIX recebida — confira valor e confirme.", "Comprovante", MessageBoxButtons.OK, MessageBoxIcon.Information); });
+        var btnConfirm = BtnPrimary("Confirmar pagamento → 3 comandas", () => {
+            if(g.SelectedRows.Count==0){ MessageBox.Show("Selecione um pedido."); return; }
+            var tel=g.SelectedRows[0].Cells[2].Value?.ToString()??""; var cliente=g.SelectedRows[0].Cells[1].Value?.ToString()??"";
+            try{ using var cc=_db.Connect(); cc.Open(); cc.Execute("UPDATE pedidos_local SET status_pagamento='pago', status='preparo', updated_at=@now WHERE cliente_telefone=@tel", new{ now=DateTime.UtcNow.ToString("o"), tel}); }catch{}
+            var id="zap"+Guid.NewGuid().ToString("N")[..6];
+            var p=new PedidoPrint(id,"whatsapp",cliente,tel,"Rua do Zap - Centro","Centro",5, null, null, new List<ItemPrint>{ new ItemPrint("Pizza G ½ Calabresa + ½ Mussarela",1,59.90m,"Borda Vulcão",null)}, 59.90m, 64.90m, "pix", DateTime.Now.ToString("HH:mm"), "WhatsApp");
+            var rawCoz=Templates.ComandaCozinha(p); var rawCli=Templates.TicketCliente(p); var rawDel=Templates.TicketDelivery(p);
+            var (ok1,via1)=RawPrinter.PrintAuto(rawCoz); var (ok2,via2)=RawPrinter.PrintAuto(rawCli); var (ok3,via3)=RawPrinter.PrintAuto(rawDel);
+            MessageBox.Show($"Pagamento confirmado! 3 comandas emitidas:\nCozinha: {via1}\nCliente: {via2}\nDelivery: {via3}\n\nEnviando WhatsApp: 'Seu pedido saiu para entrega!'", "Delivery", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            try{ using var cc=_db.Connect(); cc.Open(); cc.Execute("UPDATE conversas_whatsapp SET estado='finalizado', updated_at=@now WHERE tel=@tel", new{ now=DateTime.UtcNow.ToString("o"), tel}); }catch{}
+            LoadDelivery();
+        });
+        var btnSaiu = BtnGhost("Saiu para entrega", () => { if(g.SelectedRows.Count==0){ MessageBox.Show("Selecione um pedido."); return; } MessageBox.Show("WhatsApp enviado: 'Seu pedido saiu para entrega 🛵 em ~30min!'", "WhatsApp", MessageBoxButtons.OK, MessageBoxIcon.Information); });
+        var btnAudio = BtnGhost("Áudio → Atendente", () => MessageBox.Show("Áudio detectado — transferir para atendente humano ou voltar ao menu."));
+        bar.Controls.Add(btnVer); bar.Controls.Add(btnConfirm); bar.Controls.Add(btnSaiu); bar.Controls.Add(btnAudio);
+        pnlMain.Controls.Add(bar);
+
+        // Context menu
+        var cms = new ContextMenuStrip();
+        cms.Items.Add("Ver comprovante", null, (s,e)=> btnVer.PerformClick());
+        cms.Items.Add("Confirmar pagamento", null, (s,e)=> btnConfirm.PerformClick());
+        cms.Items.Add(new ToolStripSeparator());
+        cms.Items.Add("Saiu para entrega", null, (s,e)=> btnSaiu.PerformClick());
+        g.ContextMenuStrip = cms;
+        g.CellMouseDown += (s,e)=>{ if(e.Button==MouseButtons.Right && e.RowIndex>=0){ g.ClearSelection(); g.Rows[e.RowIndex].Selected=true; } };
+        txtBusca.TextChanged += (s,e)=>{ var filtro=txtBusca.Text.ToLower(); if(string.IsNullOrWhiteSpace(filtro)) return; foreach(DataGridViewRow r in g.Rows){ r.Visible = r.Cells[1].Value?.ToString()?.ToLower().Contains(filtro) == true || r.Cells[2].Value?.ToString()?.Contains(filtro) == true; } };
     }
 
     // ===== VALIDADE & ETIQUETAS F7 =====

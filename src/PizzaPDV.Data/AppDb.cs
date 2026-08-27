@@ -255,6 +255,27 @@ public class AppDb
             CREATE INDEX IF NOT EXISTS idx_manipulados_status ON produtos_manipulados(status);
             CREATE INDEX IF NOT EXISTS idx_sabor_insumos_sabor ON sabor_insumos(sabor_id);
             CREATE INDEX IF NOT EXISTS idx_receita_itens_receita ON receita_itens(receita_id);
+            -- WhatsApp terreno pré-configurado
+            CREATE TABLE IF NOT EXISTS conversas_whatsapp (
+                tel TEXT PRIMARY KEY,
+                nome TEXT,
+                estado TEXT NOT NULL DEFAULT 'saudacao' CHECK(estado IN ('saudacao','cadastro','menu','pizza_tamanho','sabor1','sabor2','borda','adicionais','mais_itens','bairro','endereco','pagamento','aguardando_comprovante','finalizado')),
+                carrinho_json TEXT NOT NULL DEFAULT '[]',
+                bairro_id TEXT,
+                endereco TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS whatsapp_mensagens (
+                id TEXT PRIMARY KEY,
+                tel TEXT NOT NULL REFERENCES conversas_whatsapp(tel),
+                direcao TEXT NOT NULL CHECK(direcao IN ('in','out')),
+                tipo TEXT NOT NULL,
+                body TEXT,
+                payload_json TEXT,
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_whatsapp_mensagens_tel ON whatsapp_mensagens(tel);
         ");
 
         // Migração para DBs antigos (adiciona colunas faltantes sem falhar)
