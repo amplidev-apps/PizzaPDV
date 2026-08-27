@@ -52,7 +52,13 @@ public class AppDb
                 categoria TEXT NOT NULL DEFAULT 'salgada',
                 custo REAL NOT NULL DEFAULT 0,
                 ativo INTEGER NOT NULL DEFAULT 1,
-                updated_at TEXT NOT NULL
+                updated_at TEXT NOT NULL,
+                manipulado INTEGER NOT NULL DEFAULT 0,
+                rendimento_porcoes INTEGER,
+                peso_total_g REAL,
+                custo_calculado REAL,
+                modo_preparo TEXT,
+                disponivel INTEGER NOT NULL DEFAULT 1
             );
             CREATE TABLE IF NOT EXISTS bordas (
                 id TEXT PRIMARY KEY,
@@ -127,7 +133,139 @@ public class AppDb
                 por_forma_json TEXT NOT NULL DEFAULT '{}',
                 synced INTEGER NOT NULL DEFAULT 0
             );
+            -- Estágio 0 fundação precificação justa + monte sua + validade + divisão
+            CREATE TABLE IF NOT EXISTS config (
+                chave TEXT PRIMARY KEY,
+                valor TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS insumos (
+                id TEXT PRIMARY KEY,
+                nome TEXT NOT NULL UNIQUE,
+                unidade TEXT NOT NULL CHECK(unidade IN ('g','kg','ml','l','un','col')),
+                qtd_embalagem REAL NOT NULL,
+                preco_embalagem REAL NOT NULL,
+                custo_por_unidade REAL NOT NULL DEFAULT 0,
+                tipo TEXT,
+                ativo INTEGER NOT NULL DEFAULT 1,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS receitas_massa (
+                id TEXT PRIMARY KEY,
+                nome TEXT NOT NULL UNIQUE,
+                tipo TEXT NOT NULL CHECK(tipo IN ('pizza','esfiha','salgado')),
+                peso_total_g REAL NOT NULL DEFAULT 0,
+                custo_total REAL NOT NULL DEFAULT 0,
+                custo_por_g REAL NOT NULL DEFAULT 0,
+                porcao_padrao_g REAL NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS receita_itens (
+                id TEXT PRIMARY KEY,
+                receita_id TEXT NOT NULL REFERENCES receitas_massa(id) ON DELETE CASCADE,
+                insumo_id TEXT NOT NULL REFERENCES insumos(id),
+                quantidade REAL NOT NULL,
+                unidade TEXT NOT NULL,
+                fator_perda REAL NOT NULL DEFAULT 1.0
+            );
+            CREATE TABLE IF NOT EXISTS bases_tamanho (
+                id TEXT PRIMARY KEY,
+                tamanho TEXT NOT NULL CHECK(tamanho IN ('P','G','unico')),
+                peso_massa_g REAL NOT NULL,
+                custo_massa REAL NOT NULL DEFAULT 0,
+                custo_fixos REAL NOT NULL DEFAULT 0,
+                custo_total REAL NOT NULL DEFAULT 0,
+                preco_exibido REAL NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL,
+                UNIQUE(tamanho)
+            );
+            CREATE TABLE IF NOT EXISTS sabor_insumos (
+                id TEXT PRIMARY KEY,
+                sabor_id TEXT NOT NULL REFERENCES sabores(id) ON DELETE CASCADE,
+                insumo_id TEXT NOT NULL REFERENCES insumos(id),
+                quantidade REAL NOT NULL,
+                unidade TEXT NOT NULL,
+                forma_corte TEXT CHECK(forma_corte IN ('fatiado','cubos','moido','espremido','picado','inteiro','rodelas','ralado')),
+                fator_perda REAL NOT NULL DEFAULT 1.0,
+                observacao TEXT,
+                UNIQUE(sabor_id, insumo_id, forma_corte)
+            );
+            CREATE TABLE IF NOT EXISTS recheios_porcao (
+                id TEXT PRIMARY KEY,
+                sabor_id TEXT NOT NULL REFERENCES sabores(id) ON DELETE CASCADE,
+                peso_g REAL NOT NULL DEFAULT 120,
+                preco_sugerido REAL NOT NULL DEFAULT 0,
+                disponivel INTEGER NOT NULL DEFAULT 1,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS clientes_local (
+                id TEXT PRIMARY KEY,
+                nome TEXT NOT NULL,
+                telefone TEXT NOT NULL UNIQUE,
+                bairro_id TEXT,
+                enderecos_json TEXT NOT NULL DEFAULT '[]',
+                total_pizzas_g INTEGER NOT NULL DEFAULT 0,
+                pizzas_g_para_fidelidade INTEGER NOT NULL DEFAULT 0,
+                cupons_pendentes INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS comandas (
+                id TEXT PRIMARY KEY,
+                mesa_numero INTEGER NOT NULL REFERENCES mesas(numero),
+                status TEXT NOT NULL DEFAULT 'aberta' CHECK(status IN ('aberta','fechada','paga')),
+                total REAL NOT NULL DEFAULT 0,
+                total_pago REAL NOT NULL DEFAULT 0,
+                desconto REAL NOT NULL DEFAULT 0,
+                taxa_servico REAL NOT NULL DEFAULT 0,
+                n_pessoas INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS pagamentos_comanda (
+                id TEXT PRIMARY KEY,
+                comanda_id TEXT NOT NULL REFERENCES comandas(id) ON DELETE CASCADE,
+                mesa_numero INTEGER NOT NULL,
+                valor REAL NOT NULL,
+                forma_pagamento TEXT NOT NULL,
+                status_pagamento TEXT NOT NULL DEFAULT 'pago',
+                pessoa_idx INTEGER,
+                pessoa_nome TEXT,
+                troco REAL NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                synced INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS produtos_manipulados (
+                id TEXT PRIMARY KEY,
+                nome TEXT NOT NULL,
+                categoria TEXT NOT NULL DEFAULT 'manipulado',
+                data_manipulacao TEXT NOT NULL,
+                data_validade TEXT NOT NULL,
+                dias_validade INTEGER NOT NULL DEFAULT 3,
+                responsavel TEXT NOT NULL,
+                quantidade REAL NOT NULL DEFAULT 1,
+                unidade TEXT NOT NULL DEFAULT 'un',
+                lote TEXT,
+                observacao TEXT,
+                status TEXT NOT NULL DEFAULT 'valido' CHECK(status IN ('valido','vencendo','vencido','descartado','consumido')),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_manipulados_validade ON produtos_manipulados(data_validade);
+            CREATE INDEX IF NOT EXISTS idx_manipulados_status ON produtos_manipulados(status);
+            CREATE INDEX IF NOT EXISTS idx_sabor_insumos_sabor ON sabor_insumos(sabor_id);
+            CREATE INDEX IF NOT EXISTS idx_receita_itens_receita ON receita_itens(receita_id);
         ");
+
+        // Migração para DBs antigos (adiciona colunas faltantes sem falhar)
+        try { conn.Execute("ALTER TABLE sabores ADD COLUMN manipulado INTEGER NOT NULL DEFAULT 0"); } catch {}
+        try { conn.Execute("ALTER TABLE sabores ADD COLUMN rendimento_porcoes INTEGER"); } catch {}
+        try { conn.Execute("ALTER TABLE sabores ADD COLUMN peso_total_g REAL"); } catch {}
+        try { conn.Execute("ALTER TABLE sabores ADD COLUMN custo_calculado REAL"); } catch {}
+        try { conn.Execute("ALTER TABLE sabores ADD COLUMN modo_preparo TEXT"); } catch {}
+        try { conn.Execute("ALTER TABLE sabores ADD COLUMN disponivel INTEGER NOT NULL DEFAULT 1"); } catch {}
+        try { conn.Execute("ALTER TABLE itens_pedido_local ADD COLUMN adicionais_json TEXT"); } catch {}
+        try { conn.Execute("ALTER TABLE pedidos_local ADD COLUMN valor_pago REAL DEFAULT 0"); } catch {}
 
         // Seed se vazio
         var count = conn.ExecuteScalar<long>("SELECT COUNT(*) FROM bordas");
@@ -196,6 +334,59 @@ public class AppDb
         // Caixa inicial
         conn.Execute("INSERT OR IGNORE INTO caixa_local (id,aberto_em,saldo_inicial,total_vendas,por_forma_json,synced) VALUES (@id,@now,100,0,'{}',0)",
             new { id=Guid.NewGuid().ToString(), now });
+
+        // Config padrão
+        conn.Execute("INSERT OR IGNORE INTO config (chave,valor,updated_at) VALUES ('margem_padrao','60',@now)", new { now });
+        conn.Execute("INSERT OR IGNORE INTO config (chave,valor,updated_at) VALUES ('taxa_servico','0',@now)", new { now });
+        conn.Execute("INSERT OR IGNORE INTO config (chave,valor,updated_at) VALUES ('comissao_tipo','taxa',@now)", new { now });
+
+        // Insumos base (precificação justa)
+        var insumosSeed = new[]
+        {
+            new { id=Guid.NewGuid().ToString(), nome="Farinha de Trigo", unidade="kg", qtd=1m, preco=5.00m, custo=5.00m },
+            new { id=Guid.NewGuid().ToString(), nome="Açúcar", unidade="kg", qtd=1m, preco=4.50m, custo=4.50m },
+            new { id=Guid.NewGuid().ToString(), nome="Sal", unidade="kg", qtd=1m, preco=2.00m, custo=2.00m },
+            new { id=Guid.NewGuid().ToString(), nome="Fermento", unidade="kg", qtd=0.1m, preco=8.00m, custo=80.00m },
+            new { id=Guid.NewGuid().ToString(), nome="Óleo", unidade="l", qtd=0.9m, preco=8.00m, custo=8.88m },
+            new { id=Guid.NewGuid().ToString(), nome="Ovos", unidade="un", qtd=30m, preco=18.00m, custo=0.60m },
+            new { id=Guid.NewGuid().ToString(), nome="Margarina", unidade="col", qtd=1m, preco=0.50m, custo=0.50m },
+            new { id=Guid.NewGuid().ToString(), nome="Leite", unidade="l", qtd=1m, preco=5.00m, custo=5.00m },
+            new { id=Guid.NewGuid().ToString(), nome="Água", unidade="l", qtd=1m, preco=0m, custo=0m },
+            new { id=Guid.NewGuid().ToString(), nome="Caldo Galinha pó", unidade="kg", qtd=0.05m, preco=4.00m, custo=80.00m },
+            new { id=Guid.NewGuid().ToString(), nome="Farinha Panko", unidade="kg", qtd=1m, preco=12.00m, custo=12.00m },
+            new { id=Guid.NewGuid().ToString(), nome="Mussarela peça", unidade="kg", qtd=4m, preco=42.00m, custo=10.50m },
+            new { id=Guid.NewGuid().ToString(), nome="Tomate", unidade="un", qtd=1m, preco=0.80m, custo=0.80m },
+            new { id=Guid.NewGuid().ToString(), nome="Cebola", unidade="un", qtd=1m, preco=0.60m, custo=0.60m },
+            new { id=Guid.NewGuid().ToString(), nome="Carne moída", unidade="kg", qtd=1m, preco=32.00m, custo=32.00m },
+            new { id=Guid.NewGuid().ToString(), nome="Pimenta do reino", unidade="g", qtd=100m, preco=10.00m, custo=0.10m },
+            new { id=Guid.NewGuid().ToString(), nome="Limão Tahiti", unidade="un", qtd=1m, preco=0.50m, custo=0.50m },
+            new { id=Guid.NewGuid().ToString(), nome="Embalagem pequena", unidade="un", qtd=30m, preco=25.00m, custo=0.83m },
+            new { id=Guid.NewGuid().ToString(), nome="Orégano", unidade="g", qtd=100m, preco=8.00m, custo=0.08m },
+            new { id=Guid.NewGuid().ToString(), nome="Azeitona", unidade="un", qtd=1m, preco=0.05m, custo=0.05m },
+        };
+        foreach (var ins in insumosSeed)
+        {
+            conn.Execute("INSERT OR IGNORE INTO insumos (id,nome,unidade,qtd_embalagem,preco_embalagem,custo_por_unidade,ativo,updated_at) VALUES (@id,@nome,@unidade,@qtd,@preco,@custo,1,@now)",
+                new { id=ins.id, nome=ins.nome, unidade=ins.unidade, qtd=ins.qtd, preco=ins.preco, custo=ins.custo, now });
+        }
+
+        // Receitas massa
+        var massaPizzaId = Guid.NewGuid().ToString();
+        var massaEsfihaId = Guid.NewGuid().ToString();
+        var massaSalgadoId = Guid.NewGuid().ToString();
+        conn.Execute("INSERT OR IGNORE INTO receitas_massa (id,nome,tipo,peso_total_g,custo_total,custo_por_g,porcao_padrao_g,updated_at) VALUES (@id,@nome,@tipo,@peso,@custo,@cpg,@porcao,@now)",
+            new[] {
+                new { id=massaPizzaId, nome="Massa Pizza", tipo="pizza", peso=1450m, custo=12.30m, cpg=0.00848m, porcao=320m, now },
+                new { id=massaEsfihaId, nome="Massa Esfiha", tipo="esfiha", peso=1200m, custo=10.50m, cpg=0.00875m, porcao=80m, now },
+                new { id=massaSalgadoId, nome="Massa Salgados", tipo="salgado", peso=2100m, custo=18.00m, cpg=0.00857m, porcao=100m, now },
+            });
+
+        // Bases tamanho (massa + fixos invisíveis)
+        conn.Execute("INSERT OR IGNORE INTO bases_tamanho (id,tamanho,peso_massa_g,custo_massa,custo_fixos,custo_total,preco_exibido,updated_at) VALUES (@id,@tam,@peso,@cm,@cf,@ct,@pr,@now)",
+            new[] {
+                new { id=Guid.NewGuid().ToString(), tam="P", peso=180m, cm=1.52m, cf=1.28m, ct=2.80m, pr=9.90m, now },
+                new { id=Guid.NewGuid().ToString(), tam="G", peso=320m, cm=2.71m, cf=1.89m, ct=4.60m, pr=14.90m, now },
+            });
     }
 
     // Helpers

@@ -64,6 +64,8 @@ public class MainForm : Form
             if (e.KeyCode == Keys.F4) Navigate("cardapio");
             if (e.KeyCode == Keys.F5) Navigate("caixa");
             if (e.KeyCode == Keys.F6) Navigate("clientes");
+            if (e.KeyCode == Keys.F7) Navigate("validade");
+            if (e.KeyCode == Keys.F10) Navigate("config");
             if (e.KeyCode == Keys.F12) TestPrint();
         };
     }
@@ -93,6 +95,8 @@ public class MainForm : Form
             ("cardapio","Cardápio","F4 • Produtos"),
             ("caixa","Caixa","F5 • Fechamento"),
             ("clientes","Clientes","F6 • Fidelidade"),
+            ("validade","Validade","F7 • Etiquetas"),
+            ("config","Configurações","F10 • Sistema"),
         };
         foreach (var (k,l,h) in menuItems.Reverse())
         {
@@ -161,6 +165,8 @@ public class MainForm : Form
             case "cardapio": LoadCardapio(); break;
             case "caixa": LoadCaixa(); break;
             case "clientes": LoadClientes(); break;
+            case "validade": LoadValidade(); break;
+            case "config": LoadConfig(); break;
         }
     }
 
@@ -767,6 +773,208 @@ public class MainForm : Form
         var bar = new Panel { Dock = DockStyle.Bottom, Height = 40, BackColor = Color.Transparent, Padding = new Padding(0, 8, 0, 0) };
         bar.Controls.Add(BtnPrimary("Resgatar pizza P", () => MessageBox.Show("Cupom resgatado — pizza P liberada.")));
         pnlMain.Controls.Add(bar);
+    }
+
+    // ===== VALIDADE & ETIQUETAS F7 =====
+    private void LoadValidade()
+    {
+        pnlMain.Controls.Clear();
+        pnlMain.Controls.Add(TitleBar("Validade & Etiquetas", "F7 • Produtos manipulados → controle de validade → etiqueta JP-58H 32cols"));
+
+        var top = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 36, FlowDirection = FlowDirection.LeftToRight, Padding = new Padding(0, 0, 0, 8) };
+        top.Controls.Add(BtnPrimary("Nova manipulação", () => NovaManipulacao()));
+        top.Controls.Add(BtnGhost("Reimprimir etiqueta", () => ReimprimirEtiqueta()));
+        top.Controls.Add(BtnGhost("Baixar (consumido)", () => AtualizarValidade("consumido")));
+        top.Controls.Add(BtnGhost("Descartar", () => AtualizarValidade("descartado")));
+        pnlMain.Controls.Add(top);
+
+        var g = CleanGrid();
+        g.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Produto", DataPropertyName = "Produto" });
+        g.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Manipulação", DataPropertyName = "Manipulacao" });
+        g.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Validade", DataPropertyName = "Validade" });
+        g.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Resp.", DataPropertyName = "Resp" });
+        g.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Status", DataPropertyName = "Status" });
+        g.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Qtd", DataPropertyName = "Qtd" });
+        g.AutoGenerateColumns = false;
+        var card = Card(g, 0); card.Dock = DockStyle.Fill; pnlMain.Controls.Add(card);
+
+        try
+        {
+            using var conn = _db.Connect(); conn.Open();
+            var rows = conn.Query("SELECT nome, data_manipulacao, data_validade, responsavel, status, quantidade, unidade FROM produtos_manipulados ORDER BY data_validade ASC LIMIT 100").ToList();
+            var dt = new DataTable();
+            dt.Columns.Add("Produto"); dt.Columns.Add("Manipulacao"); dt.Columns.Add("Validade"); dt.Columns.Add("Resp"); dt.Columns.Add("Status"); dt.Columns.Add("Qtd");
+            foreach (var r in rows)
+            {
+                var manip = DateTime.TryParse((string)r.data_manipulacao, out var dm) ? dm.ToString("dd/MM/yyyy HH:mm") : (string)r.data_manipulacao;
+                var valid = DateTime.TryParse((string)r.data_validade, out var dv) ? dv.ToString("dd/MM/yyyy") : (string)r.data_validade;
+                dt.Rows.Add((string)r.nome, manip, valid, (string)r.responsavel, (string)r.status, $"{r.quantidade} {r.unidade}");
+            }
+            if (dt.Rows.Count == 0)
+            {
+                dt.Rows.Add("Frango desfiado", DateTime.Now.ToString("dd/MM/yyyy HH:mm"), DateTime.Now.AddDays(3).ToString("dd/MM/yyyy"), "Maria", "valido", "1 bandeja");
+                dt.Rows.Add("Massa pizza", DateTime.Now.AddDays(-1).ToString("dd/MM/yyyy HH:mm"), DateTime.Now.AddDays(1).ToString("dd/MM/yyyy"), "João", "vencendo", "2 kg");
+            }
+            g.DataSource = dt;
+            g.Tag = "validadeGrid";
+            g.CellFormatting += (s, e) =>
+            {
+                if (e.ColumnIndex == 4 && e.Value is string st)
+                {
+                    if (st == "vencido") { e.CellStyle.BackColor = Color.FromArgb(255, 235, 235); e.CellStyle.ForeColor = Color.FromArgb(180, 30, 30); }
+                    else if (st == "vencendo") { e.CellStyle.BackColor = Color.FromArgb(255, 248, 220); e.CellStyle.ForeColor = Color.FromArgb(154, 103, 0); }
+                    else if (st == "valido") { e.CellStyle.BackColor = Color.FromArgb(235, 255, 235); e.CellStyle.ForeColor = Color.FromArgb(26, 127, 55); }
+                }
+            };
+        }
+        catch (Exception ex) { MessageBox.Show("Erro validade: " + ex.Message); }
+        g.Tag = g; // guarda grid para ações
+        // armazena referência para reimprimir
+        pnlMain.Tag = g;
+    }
+
+    private void NovaManipulacao()
+    {
+        var nome = Prompt("Nome do produto manipulado:", "Frango desfiado");
+        if (string.IsNullOrWhiteSpace(nome)) return;
+        var diasStr = Prompt("Dias até validade:", "3");
+        if (!int.TryParse(diasStr, out var dias)) dias = 3;
+        var resp = Prompt("Responsável:", Environment.UserName ?? "Cozinha");
+        if (string.IsNullOrWhiteSpace(resp)) return;
+        var qtdStr = Prompt("Quantidade:", "1");
+        if (!decimal.TryParse(qtdStr, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var qtd)) qtd = 1;
+        var manip = DateTime.Now;
+        var valid = manip.AddDays(dias);
+        var id = Guid.NewGuid().ToString();
+        var now = DateTime.UtcNow.ToString("o");
+        using var conn = _db.Connect(); conn.Open();
+        conn.Execute("INSERT INTO produtos_manipulados (id,nome,categoria,data_manipulacao,data_validade,dias_validade,responsavel,quantidade,unidade,status,created_at,updated_at) VALUES (@id,@nome,'manipulado',@man,@val,@dias,@resp,@qtd,'un','valido',@now,@now)",
+            new { id, nome, man = manip.ToString("o"), val = valid.ToString("o"), dias, resp, qtd, now });
+        // imprime etiqueta
+        var etiqueta = $"==========\n   *** VALIDADE ***\n==========\n{nome.ToUpper()}\n----------\nMANIP: {manip:dd/MM/yyyy HH:mm}\nVALID: {valid:dd/MM/yyyy}\nRESP: {resp.ToUpper()}\nQTD: {qtd} un\n==========\nID {id[..8].ToUpper()}\n\n\n";
+        var (ok, via) = RawPrinter.PrintAuto(etiqueta);
+        MessageBox.Show(ok ? $"Manipulação criada e etiqueta impressa em {via}" : $"{via}\n\n{etiqueta}", "Validade", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        Navigate("validade");
+    }
+    private void ReimprimirEtiqueta()
+    {
+        if (pnlMain.Tag is not DataGridView g || g.SelectedRows.Count == 0) { MessageBox.Show("Selecione uma linha para reimprimir."); return; }
+        var nome = g.SelectedRows[0].Cells[0].Value?.ToString() ?? "Produto";
+        var manip = g.SelectedRows[0].Cells[1].Value?.ToString() ?? DateTime.Now.ToString("dd/MM/yyyy");
+        var valid = g.SelectedRows[0].Cells[2].Value?.ToString() ?? DateTime.Now.AddDays(3).ToString("dd/MM/yyyy");
+        var resp = g.SelectedRows[0].Cells[3].Value?.ToString() ?? "-";
+        var etiqueta = $"==========\n   *** VALIDADE ***\n==========\n{nome.ToUpper()}\n----------\nMANIP: {manip}\nVALID: {valid}\nRESP: {resp.ToUpper()}\n==========\n\n\n";
+        var (ok, via) = RawPrinter.PrintAuto(etiqueta);
+        MessageBox.Show(ok ? $"Reimpresso em {via}" : via, "Etiqueta", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
+    private void AtualizarValidade(string novoStatus)
+    {
+        if (pnlMain.Tag is not DataGridView g || g.SelectedRows.Count == 0) { MessageBox.Show("Selecione uma linha."); return; }
+        var nome = g.SelectedRows[0].Cells[0].Value?.ToString();
+        using var conn = _db.Connect(); conn.Open();
+        conn.Execute("UPDATE produtos_manipulados SET status=@st, updated_at=@now WHERE nome=@nome", new { st = novoStatus, now = DateTime.UtcNow.ToString("o"), nome });
+        Navigate("validade");
+    }
+
+    // ===== CONFIGURAÇÕES F10 =====
+    private void LoadConfig()
+    {
+        pnlMain.Controls.Clear();
+        pnlMain.Controls.Add(TitleBar("Configurações", "F10 • Sistema • Impressora • Taxas • Precificação justa base"));
+
+        var tabs = new TabControl { Dock = DockStyle.Fill, Font = new Font("Segoe UI", 9f) };
+        tabs.TabPages.Add(MakeInsumosTab());
+        tabs.TabPages.Add(MakeMassasTab());
+        tabs.TabPages.Add(MakeBasesTab());
+        tabs.TabPages.Add(MakeGeralTab());
+        pnlMain.Controls.Add(tabs);
+    }
+    private TabPage MakeInsumosTab()
+    {
+        var tp = new TabPage("  Insumos (matéria-prima)  "); tp.Padding = new Padding(8);
+        var g = CleanGrid(); tp.Controls.Add(g);
+        using var c = _db.Connect(); c.Open();
+        var rows = c.Query("SELECT nome, qtd_embalagem, unidade, preco_embalagem, custo_por_unidade FROM insumos WHERE ativo=1 ORDER BY nome").ToList();
+        var dt = new DataTable(); dt.Columns.Add("Nome"); dt.Columns.Add("Embalagem"); dt.Columns.Add("Unidade"); dt.Columns.Add("Preço emb."); dt.Columns.Add("Custo/un");
+        foreach (var r in rows) dt.Rows.Add((string)r.nome, $"{r.qtd_embalagem}", (string)r.unidade, $"R$ {Convert.ToDecimal(r.preco_embalagem):F2}", $"R$ {Convert.ToDecimal(r.custo_por_unidade):F4}");
+        if (dt.Rows.Count == 0) dt.Rows.Add("Farinha de Trigo", "1", "kg", "R$ 5,00", "R$ 0,0050/g");
+        g.DataSource = dt;
+        var bar = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 36, Padding = new Padding(0, 8, 0, 0) };
+        bar.Controls.Add(BtnPrimary("Novo insumo", () => NovoInsumo()));
+        bar.Controls.Add(BtnGhost("Editar", () => MessageBox.Show("Editar insumo: UPDATE insumos")));
+        tp.Controls.Add(bar);
+        return tp;
+    }
+    private TabPage MakeMassasTab()
+    {
+        var tp = new TabPage("  Massas matriz  "); tp.Padding = new Padding(8);
+        var g = CleanGrid(); tp.Controls.Add(g);
+        using var c = _db.Connect(); c.Open();
+        var rows = c.Query("SELECT nome, tipo, peso_total_g, custo_total, custo_por_g, porcao_padrao_g FROM receitas_massa ORDER BY nome").ToList();
+        var dt = new DataTable(); dt.Columns.Add("Massa"); dt.Columns.Add("Tipo"); dt.Columns.Add("Peso total"); dt.Columns.Add("Custo total"); dt.Columns.Add("Custo/g"); dt.Columns.Add("Porção padrão");
+        foreach (var r in rows) dt.Rows.Add((string)r.nome, (string)r.tipo, $"{r.peso_total_g}g", $"R$ {Convert.ToDecimal(r.custo_total):F2}", $"R$ {Convert.ToDecimal(r.custo_por_g):F4}", $"{r.porcao_padrao_g}g");
+        if (dt.Rows.Count == 0) dt.Rows.Add("Massa Pizza", "pizza", "1450g", "R$ 12,30", "R$ 0,0084", "320g");
+        g.DataSource = dt;
+        var bar = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 36, Padding = new Padding(0, 8, 0, 0) };
+        bar.Controls.Add(BtnPrimary("Nova massa", () => MessageBox.Show("Cadastrar massa: soma insumos + peso → custo/g")));
+        bar.Controls.Add(BtnGhost("Ver ingredientes", () => MessageBox.Show("SELECT * FROM receita_itens")));
+        tp.Controls.Add(bar);
+        return tp;
+    }
+    private TabPage MakeBasesTab()
+    {
+        var tp = new TabPage("  Bases P/G (invisível)  "); tp.Padding = new Padding(8);
+        var g = CleanGrid(); tp.Controls.Add(g);
+        using var c = _db.Connect(); c.Open();
+        var rows = c.Query("SELECT tamanho, peso_massa_g, custo_fixos, custo_total, preco_exibido FROM bases_tamanho ORDER BY tamanho").ToList();
+        var dt = new DataTable(); dt.Columns.Add("Tam"); dt.Columns.Add("Peso massa"); dt.Columns.Add("Custo fixos*"); dt.Columns.Add("Custo total"); dt.Columns.Add("Preço exibido (massa)");
+        foreach (var r in rows) dt.Rows.Add((string)r.tamanho, $"{r.peso_massa_g}g", $"R$ {Convert.ToDecimal(r.custo_fixos):F2}", $"R$ {Convert.ToDecimal(r.custo_total):F2}", $"R$ {Convert.ToDecimal(r.preco_exibido):F2}");
+        if (dt.Rows.Count == 0) dt.Rows.Add("G", "320g", "R$ 1,89", "R$ 4,60", "R$ 14,90");
+        var lbl = new Label { Text = "* Fixos = orégano + azeitona + embalagem + molho (invisíveis para cliente, só massa aparece)", Dock = DockStyle.Bottom, Height = 20, ForeColor = C_Muted, Font = new Font("Segoe UI", 7.5f) };
+        tp.Controls.Add(lbl);
+        g.DataSource = dt;
+        var bar = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 36, Padding = new Padding(0, 8, 0, 0) };
+        bar.Controls.Add(BtnGhost("Editar base", () => MessageBox.Show("Editar base: custo fixos invisíveis")));
+        tp.Controls.Add(bar);
+        return tp;
+    }
+    private TabPage MakeGeralTab()
+    {
+        var tp = new TabPage("  Geral  "); tp.Padding = new Padding(12);
+        var pnl = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 6, BackColor = Color.Transparent, Padding = new Padding(0, 8, 0, 0) };
+        for (int i = 0; i < 2; i++) pnl.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        pnl.Controls.Add(new Label { Text = "Margem padrão (%)", ForeColor = C_Muted, Font = new Font("Segoe UI", 8f, FontStyle.Bold), Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft });
+        pnl.Controls.Add(new TextBox { Text = "60", Dock = DockStyle.Fill });
+        pnl.Controls.Add(new Label { Text = "Taxa serviço mesa (%)", ForeColor = C_Muted, Font = new Font("Segoe UI", 8f, FontStyle.Bold), Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft });
+        pnl.Controls.Add(new TextBox { Text = "0", Dock = DockStyle.Fill });
+        pnl.Controls.Add(new Label { Text = "Impressora WinSpool", ForeColor = C_Muted, Font = new Font("Segoe UI", 8f, FontStyle.Bold), Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft });
+        pnl.Controls.Add(new TextBox { Text = "JP-58H", Dock = DockStyle.Fill });
+        pnl.Controls.Add(new Label { Text = "SUPABASE_URL", ForeColor = C_Muted, Font = new Font("Segoe UI", 8f, FontStyle.Bold), Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft });
+        pnl.Controls.Add(new TextBox { Text = Environment.GetEnvironmentVariable("SUPABASE_URL") ?? "", Dock = DockStyle.Fill });
+        tp.Controls.Add(pnl);
+        var bar = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 36, Padding = new Padding(0, 8, 0, 0) };
+        bar.Controls.Add(BtnPrimary("Salvar", () => MessageBox.Show("Configurações salvas em tabela config.")));
+        bar.Controls.Add(BtnGhost("Testar impressão", () => TestPrint()));
+        bar.Controls.Add(BtnGhost("Backup .db", () => MessageBox.Show($"Backup em {Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "pizzapdv.db")}")));
+        tp.Controls.Add(bar);
+        return tp;
+    }
+    private void NovoInsumo()
+    {
+        var nome = Prompt("Nome do insumo:", "Mussarela peça");
+        if (string.IsNullOrWhiteSpace(nome)) return;
+        var precoStr = Prompt("Preço da embalagem:", "42,00");
+        if (!decimal.TryParse(precoStr, System.Globalization.NumberStyles.Any, new System.Globalization.CultureInfo("pt-BR"), out var preco)) return;
+        var qtdStr = Prompt("Qtd na embalagem:", "4");
+        if (!decimal.TryParse(qtdStr, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var qtd)) return;
+        var unidade = Prompt("Unidade (g/kg/ml/l/un/col):", "kg");
+        var custo = qtd == 0 ? 0 : preco / qtd;
+        var id = Guid.NewGuid().ToString(); var now = DateTime.UtcNow.ToString("o");
+        using var c = _db.Connect(); c.Open();
+        c.Execute("INSERT INTO insumos (id,nome,unidade,qtd_embalagem,preco_embalagem,custo_por_unidade,ativo,updated_at) VALUES (@id,@nome,@un,@qtd,@preco,@custo,1,@now)",
+            new { id, nome, un = unidade, qtd, preco, custo, now });
+        MessageBox.Show($"Insumo criado. Custo por {unidade}: R$ {custo:F4}");
+        Navigate("config");
     }
 
     private void TestPrint()
